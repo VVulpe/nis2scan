@@ -283,4 +283,7 @@ Verlaufsabschnitte (Batches Nr. 4–10) und der Kampagnen-Bilanz.
 - **Merge-Bedingungen:** (a) grüner Live-Integrationslauf AZ-NR9-007 gegen
   echten Tenant nach Admin-Consent für `AuditLog.Read.All` der CI-App
   (Terraform vorbereitet, `infra/azure/oidc/main.tf`); (b) Gründer-Vermerk.
-- Gründer-Vermerk (a): AUSSTEHEND.
+- **Gründer-Vermerk: ERTEILT (Chat-Freigabe 14.07.2026)** — nach Zweitprüfung PASS
+  (Nachprüfung 5cdc101) und grünem Live-Integrationslauf (Run 29338070278,
+  51/51 bestanden; AZ-NR9-007 liefert echte Graph-Ergebnisse, Admin-Consent
+  AuditLog.Read.All erteilt). Beide ADR-0018-Vermerke liegen vor — Merge frei.
