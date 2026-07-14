@@ -1,0 +1,151 @@
+"""Tests for §30 Nr. 6 — Wirksamkeit GCP checks incl. positive evidence (ADR-0006)."""
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from nis2scan.engine.models.finding import FindingStatus
+from nis2scan.engine.providers.gcp.checks.nr6_wirksamkeit import (
+    CheckAuditLogIntegrity,
+    CheckMonitoringDashboards,
+    CheckPolicyIntelligence,
+    CheckSecurityHealthAnalytics,
+)
+
+from .conftest import FakeGcpSession
+
+
+def _compliant(result):
+    return [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
+
+
+def _maengel(result):
+    return [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+
+
+class TestCheckAuditLogIntegrity:
+    @pytest.fixture
+    def logging_client(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        from google.cloud import logging_v2
+
+        client = MagicMock()
+        monkeypatch.setattr(logging_v2, "ConfigServiceV2Client", lambda credentials: client, raising=False)
+        return client
+
+    def test_storage_sink_produces_positive_evidence(self, logging_client: MagicMock):
+        logging_client.list_sinks.return_value = [
+            SimpleNamespace(destination="storage.googleapis.com/audit-bucket"),
+        ]
+
+        result = asyncio.run(CheckAuditLogIntegrity().execute(FakeGcpSession()))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_no_storage_sink_produces_finding(self, logging_client: MagicMock):
+        logging_client.list_sinks.return_value = [
+            SimpleNamespace(destination="bigquery.googleapis.com/projects/x/datasets/y"),
+        ]
+
+        result = asyncio.run(CheckAuditLogIntegrity().execute(FakeGcpSession()))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+
+class TestCheckSecurityHealthAnalytics:
+    @pytest.fixture
+    def scc_client(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        from google.cloud import securitycenter_v1
+
+        client = MagicMock()
+        monkeypatch.setattr(securitycenter_v1, "SecurityCenterClient", lambda credentials: client)
+        return client
+
+    def test_accessible_scc_produces_positive_evidence(self, scc_client: MagicMock):
+        scc_client.list_findings.return_value = iter([SimpleNamespace(name="finding-1")])
+
+        result = asyncio.run(CheckSecurityHealthAnalytics().execute(FakeGcpSession()))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_generic_permission_denied_produces_check_error_not_finding(self, scc_client: MagicMock):
+        # B-Nr.6-13(ii): a bare "permission denied" is not an unambiguous
+        # deactivation signal — it must become a CheckError, not a Mangel.
+        scc_client.list_findings.side_effect = RuntimeError("403 permission denied")
+
+        result = asyncio.run(CheckSecurityHealthAnalytics().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+
+    def test_access_not_configured_produces_finding(self, scc_client: MagicMock):
+        # Unambiguous deactivation signal → still a Mangel finding.
+        scc_client.list_findings.side_effect = RuntimeError(
+            "PERMISSION_DENIED: Security Center API accessNotConfigured"
+        )
+
+        result = asyncio.run(CheckSecurityHealthAnalytics().execute(FakeGcpSession()))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+        assert not result.errors
+
+
+class TestCheckPolicyIntelligence:
+    def _session(self, error_message: str | None) -> FakeGcpSession:
+        svc = MagicMock()
+        chain = svc.projects.return_value.locations.return_value.recommenders.return_value
+        if error_message is not None:
+            chain.recommendations.return_value.list.return_value.execute.side_effect = RuntimeError(error_message)
+        else:
+            chain.recommendations.return_value.list.return_value.execute.return_value = {"recommendations": []}
+        return FakeGcpSession(services={"recommender": svc})
+
+    def test_accessible_recommender_produces_positive_evidence(self):
+        result = asyncio.run(CheckPolicyIntelligence().execute(self._session(error_message=None)))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_generic_permission_denied_produces_check_error_not_finding(self):
+        # B-Nr.6-13(ii): same unified classification as GCP-NR6-002.
+        session = self._session(error_message="403 permission denied")
+
+        result = asyncio.run(CheckPolicyIntelligence().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+
+    def test_access_not_configured_produces_finding(self):
+        session = self._session(error_message="PERMISSION_DENIED: Recommender API accessNotConfigured")
+
+        result = asyncio.run(CheckPolicyIntelligence().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+        assert not result.errors
+
+
+class TestCheckMonitoringDashboards:
+    def _session(self, dashboards: int) -> FakeGcpSession:
+        svc = MagicMock()
+        svc.projects.return_value.dashboards.return_value.list.return_value.execute.return_value = {
+            "dashboards": [{"name": f"db-{i}"} for i in range(dashboards)]
+        }
+        return FakeGcpSession(services={"monitoring": svc})
+
+    def test_dashboards_produce_positive_evidence(self):
+        result = asyncio.run(CheckMonitoringDashboards().execute(self._session(dashboards=1)))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_no_dashboards_produces_finding(self):
+        result = asyncio.run(CheckMonitoringDashboards().execute(self._session(dashboards=0)))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)

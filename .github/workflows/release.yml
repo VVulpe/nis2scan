@@ -1,0 +1,34 @@
+# Release pipeline (ADR-0019): every git tag v* automatically publishes the
+# free package to PyPI. No manual builds, no stored API tokens — PyPI Trusted
+# Publishing via OIDC.
+#
+# One-time setup on pypi.org (project "nis2scan" -> Publishing):
+#   owner: VVulpe, repo: nis2scan, workflow: release.yml, environment: pypi
+#
+# Version coupling (ADR-0019): a new MINOR release of nis2scan requires a
+# matching nis2scan-premium release whose NIS2SCAN_REQUIRES covers it —
+# tag both repos together so compatible pairs always appear together.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # PyPI Trusted Publishing (OIDC) + provenance attestation
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+      - name: Publish to PyPI (Trusted Publishing, incl. attestations)
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,130 @@
+name: AWS Misconfigurations (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+concurrency:
+  group: aws-misconfigurations
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  TF_VAR_run_id: manual
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies (needed by Terraform provisioners)
+        run: pip install boto3 pyotp
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: infra/aws
+        run: terraform init
+
+      # --- DESTROY: download state from previous apply ---
+      - name: Download Terraform State from latest apply
+        if: inputs.action == 'destroy'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Try each recent successful run until we find one with the state artifact
+          FOUND=false
+          for RUN_ID in $(gh run list --workflow=aws-misconfigurations.yml --status=success --limit=10 --json databaseId -q '.[].databaseId'); do
+            echo "Trying run $RUN_ID..."
+            if gh run download "$RUN_ID" --name terraform-misconfig-state --dir infra/aws 2>/dev/null; then
+              echo "Downloaded state from run $RUN_ID"
+              FOUND=true
+              break
+            fi
+          done
+          if [ "$FOUND" = "false" ]; then
+            echo "::warning::No state artifact found — skipping terraform destroy, using nuke script only"
+          fi
+
+      # --- APPLY ---
+      - name: Terraform Apply
+        if: inputs.action == 'apply'
+        working-directory: infra/aws
+        run: terraform apply -auto-approve
+
+      - name: Show Terraform Outputs
+        if: inputs.action == 'apply'
+        working-directory: infra/aws
+        run: |
+          echo "### Terraform Outputs" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          terraform output -json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      # --- APPLY: upload state for later destroy ---
+      - name: Upload Terraform State
+        if: inputs.action == 'apply'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-misconfig-state
+          path: |
+            infra/aws/terraform.tfstate
+            infra/aws/terraform.tfstate.backup
+          retention-days: 30
+          overwrite: true
+
+      # --- DESTROY: pre-destroy cleanup (out-of-band resources) ---
+      - name: Pre-destroy cleanup (MFA devices, login profiles, access keys)
+        if: inputs.action == 'destroy'
+        run: python3 infra/aws/scripts/pre_destroy_cleanup.py
+
+      # --- DESTROY: terraform destroy (if state available) ---
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy'
+        working-directory: infra/aws
+        run: |
+          if [ -f terraform.tfstate ]; then
+            terraform destroy -auto-approve
+          else
+            echo "No state file — skipping terraform destroy"
+          fi
+
+      # --- DESTROY: nuke remaining resources (safety net) ---
+      - name: Nuke leftover test resources (safety net)
+        if: inputs.action == 'destroy'
+        run: python3 infra/aws/scripts/nuke_test_resources.py --region ${{ env.AWS_REGION }}
+
+      # --- DESTROY: verify no leftover resources ---
+      - name: Post-destroy verification
+        if: inputs.action == 'destroy'
+        run: python3 infra/aws/scripts/post_destroy_verify.py --region ${{ env.AWS_REGION }}

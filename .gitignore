@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Type checking
+.mypy_cache/
+
+# Reports & remediation output (not source code in nis2scan/remediation/)
+reports/
+/remediation/
+*.pdf
+
+# Secrets — NEVER commit
+.env
+.env.*
+credentials.json
+*.pem
+*.key
+
+# Config overrides (keep default.yaml, ignore local)
+config/local.yaml
+config/*.local.yaml
+
+# Terraform
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/.terraform.lock.hcl
+
+# Integration test outputs
+tests/integration/tf_outputs.json
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# Session working memory — local only, never published
+MEMORY.md

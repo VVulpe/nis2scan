@@ -1,0 +1,88 @@
+name: Integration Tests (AWS)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: integration-aws-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: eu-central-1
+  TF_VAR_run_id: ${{ github.run_id }}
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7"
+          terraform_wrapper: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" pyotp
+
+      - name: Terraform Init
+        working-directory: infra/aws
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: infra/aws
+        run: terraform apply -auto-approve
+
+      - name: Export Terraform Outputs
+        working-directory: infra/aws
+        run: terraform output -json > ../../tests/integration/tf_outputs.json
+
+      - name: Run Integration Tests
+        run: pytest tests/integration/test_integration_nr*.py -v --tb=short -m integration -n auto
+
+      # === Cleanup Phase (always runs, even on failure) ===
+
+      - name: Pre-Destroy Cleanup (IAM MFA, login profiles, access keys)
+        if: always()
+        run: python infra/aws/scripts/pre_destroy_cleanup.py
+
+      - name: Terraform Init (for destroy)
+        if: always()
+        working-directory: infra/aws
+        run: terraform init
+
+      - name: Terraform Destroy
+        id: destroy
+        if: always()
+        working-directory: infra/aws
+        run: terraform destroy -auto-approve
+        continue-on-error: true
+
+      - name: Nuke Remaining Resources (safety net — always runs)
+        if: always()
+        run: python infra/aws/scripts/nuke_test_resources.py
+
+      - name: Post-Destroy Verification
+        if: always()
+        run: python infra/aws/scripts/post_destroy_verify.py --region ${{ env.AWS_REGION }}

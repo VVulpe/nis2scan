@@ -1,0 +1,300 @@
+"""Tests for §30 Nr. 8 — Kryptographie Azure checks incl. positive evidence (ADR-0006)."""
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from nis2scan.engine.models.finding import FindingStatus
+from nis2scan.engine.providers.azure.checks.nr8_kryptographie import (
+    CheckAppGatewayTls,
+    CheckAppServiceHttps,
+    CheckDiskEncryption,
+    CheckKeyVaultRotation,
+    CheckSqlTde,
+    CheckStorageEncryption,
+)
+
+from .conftest import SUB_ID, FakeAzureSession
+
+
+def _compliant(result):
+    return [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
+
+
+def _maengel(result):
+    return [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+
+
+class TestCheckStorageEncryption:
+    def _client(self, key_source: str) -> MagicMock:
+        client = MagicMock()
+        client.storage_accounts.list.return_value = [
+            SimpleNamespace(name="st1", encryption=SimpleNamespace(key_source=key_source)),
+        ]
+        return client
+
+    def test_cmk_produces_positive_evidence(self):
+        session = FakeAzureSession({"StorageManagementClient": self._client("Microsoft.Keyvault")})
+
+        result = asyncio.run(CheckStorageEncryption().execute(session))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_platform_keys_produce_finding(self):
+        session = FakeAzureSession({"StorageManagementClient": self._client("Microsoft.Storage")})
+
+        result = asyncio.run(CheckStorageEncryption().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+
+class TestCheckDiskEncryption:
+    def _client(self, encrypted: bool) -> MagicMock:
+        client = MagicMock()
+        client.disks.list.return_value = [
+            SimpleNamespace(
+                name="disk1",
+                encryption=SimpleNamespace(type="EncryptionAtRestWithPlatformKey") if encrypted else None,
+            ),
+        ]
+        return client
+
+    def test_encrypted_disks_produce_positive_evidence(self):
+        session = FakeAzureSession({"ComputeManagementClient": self._client(encrypted=True)})
+
+        result = asyncio.run(CheckDiskEncryption().execute(session))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_unencrypted_disk_produces_finding(self):
+        session = FakeAzureSession({"ComputeManagementClient": self._client(encrypted=False)})
+
+        result = asyncio.run(CheckDiskEncryption().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+
+class TestCheckSqlTde:
+    def _client(self, tde_state: str) -> MagicMock:
+        server_id = f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.Sql/servers/srv1"
+        client = MagicMock()
+        client.servers.list.return_value = [
+            SimpleNamespace(name="srv1", id=server_id, location="westeurope"),
+        ]
+        client.databases.list_by_server.return_value = [
+            SimpleNamespace(name="appdb", id=f"{server_id}/databases/appdb"),
+        ]
+        client.transparent_data_encryptions.get.return_value = SimpleNamespace(state=tde_state)
+        return client
+
+    def test_tde_enabled_produces_positive_evidence(self):
+        session = FakeAzureSession({"SqlManagementClient": self._client("Enabled")})
+
+        result = asyncio.run(CheckSqlTde().execute(session))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_tde_disabled_produces_finding(self):
+        session = FakeAzureSession({"SqlManagementClient": self._client("Disabled")})
+
+        result = asyncio.run(CheckSqlTde().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+
+class TestCheckKeyVaultRotation:
+    def _client(self, protected: bool) -> MagicMock:
+        vault_id = f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv1"
+        client = MagicMock()
+        client.vaults.list.return_value = [
+            SimpleNamespace(name="kv1", id=vault_id, location="westeurope"),
+        ]
+        client.vaults.get.return_value = SimpleNamespace(
+            properties=SimpleNamespace(
+                enable_soft_delete=protected,
+                enable_purge_protection=protected,
+            )
+        )
+        return client
+
+    def test_protected_vault_produces_positive_evidence(self):
+        session = FakeAzureSession({"KeyVaultManagementClient": self._client(protected=True)})
+
+        result = asyncio.run(CheckKeyVaultRotation().execute(session))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_unprotected_vault_produces_finding(self):
+        session = FakeAzureSession({"KeyVaultManagementClient": self._client(protected=False)})
+
+        result = asyncio.run(CheckKeyVaultRotation().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+
+class TestCheckAppServiceHttps:
+    def _client(self, https_only: bool, min_tls: str) -> MagicMock:
+        client = MagicMock()
+        client.web_apps.list.return_value = [
+            SimpleNamespace(
+                name="app1",
+                https_only=https_only,
+                location="westeurope",
+                id=f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.Web/sites/app1",
+                site_config=SimpleNamespace(min_tls_version=min_tls),
+            ),
+        ]
+        return client
+
+    def test_enforced_https_produces_positive_evidence(self):
+        session = FakeAzureSession({"WebSiteManagementClient": self._client(True, "1.2")})
+
+        result = asyncio.run(CheckAppServiceHttps().execute(session))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_missing_https_produces_finding(self):
+        session = FakeAzureSession({"WebSiteManagementClient": self._client(False, "1.0")})
+
+        result = asyncio.run(CheckAppServiceHttps().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+    def _client_with_empty_site_config(
+        self,
+        https_only: bool,
+        get_configuration_result: str | None = None,
+        get_configuration_error: Exception | None = None,
+    ) -> MagicMock:
+        # Simulates web_apps.list() not populating site_config (B-Nr.8-9) —
+        # the check must fall back to get_configuration().
+        client = MagicMock()
+        client.web_apps.list.return_value = [
+            SimpleNamespace(
+                name="app1",
+                https_only=https_only,
+                location="westeurope",
+                id=f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.Web/sites/app1",
+                site_config=None,
+            ),
+        ]
+        if get_configuration_error is not None:
+            client.web_apps.get_configuration.side_effect = get_configuration_error
+        else:
+            client.web_apps.get_configuration.return_value = SimpleNamespace(min_tls_version=get_configuration_result)
+        return client
+
+    def test_site_config_empty_get_configuration_tls10_produces_finding(self):
+        session = FakeAzureSession(
+            {"WebSiteManagementClient": self._client_with_empty_site_config(True, get_configuration_result="1.0")}
+        )
+
+        result = asyncio.run(CheckAppServiceHttps().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+        assert "1.0" in _maengel(result)[0].description
+
+    def test_site_config_empty_get_configuration_tls12_produces_positive_evidence(self):
+        session = FakeAzureSession(
+            {"WebSiteManagementClient": self._client_with_empty_site_config(True, get_configuration_result="1.2")}
+        )
+
+        result = asyncio.run(CheckAppServiceHttps().execute(session))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_tls_unreadable_with_https_only_produces_https_only_evidence_and_checkerror(self):
+        session = FakeAzureSession(
+            {
+                "WebSiteManagementClient": self._client_with_empty_site_config(
+                    True, get_configuration_error=Exception("boom")
+                )
+            }
+        )
+
+        result = asyncio.run(CheckAppServiceHttps().execute(session))
+
+        compliant = _compliant(result)
+        assert len(compliant) == 1
+        assert not _maengel(result)
+        # Only the verified HTTPS-Only fact is attested — no TLS>=1.2 claim.
+        assert compliant[0].audit_evidence == "web_apps: app1 https_only=true; min_tls_version nicht auslesbar"
+        assert "TLS" not in compliant[0].expected_state or "nicht verifiziert" in compliant[0].expected_state
+        assert any(e.error_type == "UnverifiableState" for e in result.errors)
+
+
+class TestCheckAppGatewayTls:
+    def _client(self, min_version: str | None) -> MagicMock:
+        client = MagicMock()
+        client.application_gateways.list_all.return_value = [
+            SimpleNamespace(
+                name="agw1",
+                location="westeurope",
+                id=f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.Network/applicationGateways/agw1",
+                ssl_policy=SimpleNamespace(min_protocol_version=min_version) if min_version else None,
+            ),
+        ]
+        return client
+
+    def _client_predefined(self, policy_name: str) -> MagicMock:
+        client = MagicMock()
+        client.application_gateways.list_all.return_value = [
+            SimpleNamespace(
+                name="agw1",
+                location="westeurope",
+                id=f"/subscriptions/{SUB_ID}/resourceGroups/rg/providers/Microsoft.Network/applicationGateways/agw1",
+                ssl_policy=SimpleNamespace(
+                    min_protocol_version=None,
+                    policy_type="Predefined",
+                    policy_name=policy_name,
+                ),
+            ),
+        ]
+        return client
+
+    def test_tls12_produces_positive_evidence(self):
+        session = FakeAzureSession({"NetworkManagementClient": self._client("TLSv1_2")})
+
+        result = asyncio.run(CheckAppGatewayTls().execute(session))
+
+        assert len(_compliant(result)) == 1
+        assert not _maengel(result)
+
+    def test_tls10_produces_finding(self):
+        session = FakeAzureSession({"NetworkManagementClient": self._client("TLSv1_0")})
+
+        result = asyncio.run(CheckAppGatewayTls().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+    def test_no_policy_produces_finding(self):
+        session = FakeAzureSession({"NetworkManagementClient": self._client(None)})
+
+        result = asyncio.run(CheckAppGatewayTls().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+
+    def test_predefined_policy_20150501_produces_finding(self):
+        # B-Nr.8-10: min_protocol_version is unset but policy_type=Predefined
+        # with policy_name=AppGwSslPolicy20150501 maps to TLSv1_0 -> Mangel.
+        session = FakeAzureSession({"NetworkManagementClient": self._client_predefined("AppGwSslPolicy20150501")})
+
+        result = asyncio.run(CheckAppGatewayTls().execute(session))
+
+        assert len(_maengel(result)) == 1
+        assert not _compliant(result)
+        assert "TLSv1_0" in _maengel(result)[0].current_state["min_protocol_version"]
