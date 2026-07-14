@@ -287,3 +287,28 @@ Verlaufsabschnitte (Batches Nr. 4–10) und der Kampagnen-Bilanz.
   (Nachprüfung 5cdc101) und grünem Live-Integrationslauf (Run 29338070278,
   51/51 bestanden; AZ-NR9-007 liefert echte Graph-Ergebnisse, Admin-Consent
   AuditLog.Read.All erteilt). Beide ADR-0018-Vermerke liegen vor — Merge frei.
+
+#### Delta-Review msgraph-sdk-Ablösung — alle Azure-Graph-Checks auf REST (2026-07-14)
+
+- Gegenstand (Branch `msgraph-sdk-abloesung`, 843ea82 + 2de7f50): 11
+  GraphServiceClient-Call-Sites in nr4/nr7/nr9/nr10 auf
+  `engine/providers/azure/graph.py` (graph_get_all/graph_get) migriert;
+  msgraph-sdk aus den Dependencies entfernt. Transport-Swap — gleiche
+  v1.0-Endpoints, camelCase-Wire-Keys, ISO-Datums-Parsing.
+- **Zweitprüfung (legal-reviewer) PASS** mit zwei Auflagen: (1) mechanischer
+  Text-Invarianz-Nachweis als Anlage — ERBRACHT: `git diff -U0 main.. --
+  nis2scan/` über title/description/pruefgrenzen/remediation/audit_evidence/
+  expected_state/bsig_30_text/required_permissions = **0 Treffer**;
+  (2) grüner Live-Integrationslauf — ERBRACHT: Run 29344788128 vom Branch,
+  51/51 bestanden gegen den echten Tenant. Wire-Key-Stichproben aller Module
+  gegen die Graph-v1.0-Referenz verifiziert, Fail-safe-Pfade (ADR-0016)
+  unverändert, keine neuen rechtlich formulierenden Texte.
+- **Bewusste Verbesserung (kein identisches Verhalten, Reviewer-Hinweis):**
+  Die SDK-Aufrufe lasen nur die erste Ergebnisseite; graph_get_all folgt
+  @odata.nextLink. Zählwerte und Positivnachweise können jetzt Objekte
+  jenseits von Seite 1 einbeziehen — durchgehend pro Vollständigkeit.
+- Nebenfix: `__version__` single-sourced (hatch dynamic; CLI und
+  ADR-0019-Loader-Meldung zeigten seit 0.1.1 fälschlich 0.1.0).
+- **Gründer-Vermerk: ERTEILT (Chat-Freigabe 14.07.2026 „ok, super, setze
+  gerne den Vermerk", wirksam mit Erfüllung beider Auflagen).** Beide
+  ADR-0018-Vermerke liegen vor — Merge frei.
