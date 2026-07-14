@@ -96,3 +96,12 @@ class TestCheckStaleServicePrincipals:
         check = CheckStaleServicePrincipals()
         result = await check.execute(azure_session)
         assert result.check_id == "AZ-NR9-007"
+        # Live proof (ADR-0018 delta review, condition Z1): both Graph calls
+        # must succeed — any error other than the fail-safe InconclusiveState
+        # means the check cannot deliver results, which is exactly the defect
+        # class this rework fixes.
+        hard_errors = [e for e in result.errors if e.error_type != "InconclusiveState"]
+        assert not hard_errors, f"Graph access failed: {hard_errors}"
+        # The tenant always contains at least the CI app itself, so the check
+        # must state something: a finding or the inconclusive marker.
+        assert result.findings or result.errors
