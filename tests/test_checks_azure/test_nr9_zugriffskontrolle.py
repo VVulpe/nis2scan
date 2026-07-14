@@ -243,6 +243,7 @@ class TestCheckGuestAccessRestrictions:
 
 class TestCheckStaleServicePrincipals:
     MS_TENANT = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
+    MS_FIRST_PARTY_TENANT = "72f988bf-86f1-41af-91ab-2d7cd011db47"
 
     def _setup(
         self,
@@ -315,11 +316,13 @@ class TestCheckStaleServicePrincipals:
         assert result.errors[0].error_type == "InconclusiveState"
 
     def test_microsoft_first_party_apps_are_excluded(self, monkeypatch: pytest.MonkeyPatch):
-        # MS-owned SPs without sign-in data must not trigger InconclusiveState.
+        # MS-owned SPs (both Microsoft tenants, legal review B1) without
+        # sign-in data must not trigger InconclusiveState.
         self._setup(
             monkeypatch,
             sps=[
                 {"appId": "ms-app", "appOwnerOrganizationId": self.MS_TENANT},
+                {"appId": "ms-app-2", "appOwnerOrganizationId": self.MS_FIRST_PARTY_TENANT},
                 {"appId": "app-1", "appOwnerOrganizationId": None},
             ],
             activities=[self._activity("app-1", days_ago=5)],

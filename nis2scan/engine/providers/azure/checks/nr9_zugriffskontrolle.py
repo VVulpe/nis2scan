@@ -636,14 +636,25 @@ class CheckStaleServicePrincipals(BaseCheck):
     pruefgrenzen = (
         "Ermittelt die letzte Anmeldung je Service Principal über den "
         "Microsoft-Graph-Report servicePrincipalSignInActivities (Beta-Endpoint; "
-        "Änderungen durch Microsoft vorbehalten). Service Principals ohne "
-        "Sign-in-Datensatz — etwa nie verwendete oder solche außerhalb des "
-        "Log-Horizonts des Tenants — werden als nicht bewertbar gemeldet, "
-        "nie als konform. Microsoft-First-Party-Apps sind ausgenommen."
+        "von Microsoft ohne Produktions-Support bereitgestellt und jederzeit "
+        "änderbar). Service Principals ohne Sign-in-Datensatz — z. B. nie "
+        "verwendete oder solche außerhalb des Log-Horizonts des Tenants — "
+        "werden als nicht bewertbar gemeldet, nie als konform. Service "
+        "Principals aus den beiden Microsoft-eigenen Tenants (Microsoft "
+        "Services, Microsoft-Erstanbieter-Apps) sind ausgenommen."
     )
 
-    SP_URL = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,appOwnerOrganizationId&$top=999"
+    # Documented maximum page size for /servicePrincipals is 100.
+    SP_URL = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,appOwnerOrganizationId&$top=100"
     SIGNIN_REPORT_URL = "https://graph.microsoft.com/beta/reports/servicePrincipalSignInActivities"
+    # Microsoft-owned tenants hosting first-party apps (B1, legal review):
+    # f8cdef31… = Microsoft Services, 72f988bf… = Microsoft first-party apps.
+    MS_TENANT_IDS = frozenset(
+        {
+            "f8cdef31-a31e-4b4a-93e4-5f571e91255a",
+            "72f988bf-86f1-41af-91ab-2d7cd011db47",
+        }
+    )
 
     async def execute(self, session: Any) -> CheckResult:
         findings: list[Finding] = []
@@ -668,9 +679,8 @@ class CheckStaleServicePrincipals(BaseCheck):
             unknown_count = 0
 
             for sp in service_principals:
-                # Skip Microsoft first-party apps
-                ms_tenant_id = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
-                if sp.get("appOwnerOrganizationId") == ms_tenant_id:
+                # Skip Microsoft first-party apps (both MS-owned tenants)
+                if sp.get("appOwnerOrganizationId") in self.MS_TENANT_IDS:
                     continue
 
                 last_sign_in = last_sign_in_by_app.get(sp.get("appId", ""))
@@ -728,8 +738,10 @@ class CheckStaleServicePrincipals(BaseCheck):
                         current_state={"stale_service_principals": stale_count},
                         expected_state=f"Keine Service Principals > {MAX_INACTIVE_DAYS} Tage inaktiv",
                         remediation=(
-                            "Überprüfen und entfernen Sie nicht genutzte Service Principals: "
-                            "Entra Admin Center → App-Registrierungen → Nach Inaktivität filtern"
+                            "Überprüfen und entfernen bzw. deaktivieren Sie nicht genutzte "
+                            "Service Principals: Entra Admin Center → Unternehmensanwendungen; "
+                            "letzte Nutzung über Anmeldeprotokolle → "
+                            "Dienstprinzipal-Anmeldungen abgleichen"
                         ),
                         remediation_effort="MEDIUM",
                         audit_evidence=(
@@ -747,8 +759,8 @@ class CheckStaleServicePrincipals(BaseCheck):
                         error_type="InconclusiveState",
                         message=(
                             f"{unknown_count} Service Principal(s) ohne Eintrag im Graph-Report "
-                            "servicePrincipalSignInActivities — nicht bewertbar (nie angemeldet "
-                            "oder außerhalb des Log-Horizonts des Tenants)"
+                            "servicePrincipalSignInActivities — nicht bewertbar (z. B. nie "
+                            "angemeldet oder außerhalb des Log-Horizonts des Tenants)"
                         ),
                         region="global",
                     )

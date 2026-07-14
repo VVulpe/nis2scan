@@ -86,6 +86,10 @@ resource "azuread_application" "nis2scan_ci" {
       id   = "483bed4a-2ad3-4361-a73b-c83ccdbdc53c" # RoleManagement.Read.Directory
       type = "Role"
     }
+    resource_access {
+      id   = "b0afded3-3588-46d8-8b3d-9842eff778da" # AuditLog.Read.All (AZ-NR9-007 sign-in report)
+      type = "Role"
+    }
   }
 }
 
