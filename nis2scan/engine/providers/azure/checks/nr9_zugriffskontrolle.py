@@ -661,7 +661,10 @@ class CheckStaleServicePrincipals(BaseCheck):
                 if sp.app_owner_organization_id and str(sp.app_owner_organization_id) == ms_tenant_id:
                     continue
 
-                sign_in = sp.sign_in_activity
+                # signInActivity is not part of the generated v1.0 model on
+                # every msgraph-sdk release; absence surfaces as CheckError
+                # (fail-safe, ADR-0016) — never as a silent pass.
+                sign_in = sp.sign_in_activity  # type: ignore[attr-defined, unused-ignore]
                 if sign_in and sign_in.last_sign_in_date_time:
                     evaluated_count += 1
                     if sign_in.last_sign_in_date_time < threshold:

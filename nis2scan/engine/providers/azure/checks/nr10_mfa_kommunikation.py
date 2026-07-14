@@ -287,7 +287,7 @@ class CheckVpnBastion(BaseCheck):
                 vpn_gateways = list(network_client.virtual_network_gateways.list_all())
 
                 # Check for Bastion hosts
-                from azure.mgmt.resource import ResourceManagementClient
+                from azure.mgmt.resource.resources import ResourceManagementClient
 
                 resource_client = session.get_client(ResourceManagementClient, sub_id)
                 bastion_hosts = [

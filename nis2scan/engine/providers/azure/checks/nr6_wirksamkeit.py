@@ -179,7 +179,9 @@ class CheckPolicyComplianceState(BaseCheck):
 
         for sub_id in session.subscription_ids:
             try:
-                from azure.mgmt.policyinsights import PolicyInsightsClient  # type: ignore[import-untyped]
+                from azure.mgmt.policyinsights import (  # type: ignore[import-untyped, unused-ignore]
+                    PolicyInsightsClient,
+                )
 
                 policy_client = PolicyInsightsClient(session.credential, sub_id)
                 query_results = list(
@@ -483,7 +485,7 @@ class CheckDiagnosticSettings(BaseCheck):
         for sub_id in session.subscription_ids:
             try:
                 from azure.mgmt.monitor import MonitorManagementClient
-                from azure.mgmt.resource import ResourceManagementClient
+                from azure.mgmt.resource.resources import ResourceManagementClient
 
                 resource_client = session.get_client(ResourceManagementClient, sub_id)
                 monitor_client = session.get_client(MonitorManagementClient, sub_id)

@@ -62,7 +62,7 @@ class CheckLighthouseDelegations(BaseCheck):
 
         for sub_id in session.subscription_ids:
             try:
-                from azure.mgmt.resource import ResourceManagementClient
+                from azure.mgmt.resource.resources import ResourceManagementClient
 
                 resource_client = session.get_client(ResourceManagementClient, sub_id)
                 delegations = [

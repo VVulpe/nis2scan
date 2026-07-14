@@ -231,7 +231,7 @@ class CheckSentinelPlaybooks(BaseCheck):
 
         for sub_id in session.subscription_ids:
             try:
-                from azure.mgmt.resource import ResourceManagementClient
+                from azure.mgmt.resource.resources import ResourceManagementClient
 
                 rm_client = session.get_client(ResourceManagementClient, sub_id)
                 # Look for Logic Apps in the subscription
@@ -430,7 +430,7 @@ class CheckAlertProcessingRules(BaseCheck):
 
         for sub_id in session.subscription_ids:
             try:
-                from azure.mgmt.resource import ResourceManagementClient
+                from azure.mgmt.resource.resources import ResourceManagementClient
 
                 rm_client = session.get_client(ResourceManagementClient, sub_id)
                 # Alert processing rules are under Microsoft.AlertsManagement/actionRules

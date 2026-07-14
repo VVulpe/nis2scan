@@ -199,7 +199,7 @@ class CheckSqlBackupRetention(BaseCheck):
 
         for sub_id in session.subscription_ids:
             try:
-                from azure.mgmt.sql import SqlManagementClient  # type: ignore[import-untyped]
+                from azure.mgmt.sql import SqlManagementClient  # type: ignore[import-untyped, unused-ignore]
 
                 sql_client = session.get_client(SqlManagementClient, sub_id)
                 servers = list(sql_client.servers.list())
@@ -742,7 +742,7 @@ class CheckTrafficManagerFrontDoor(BaseCheck):
 
         for sub_id in session.subscription_ids:
             try:
-                from azure.mgmt.resource import ResourceManagementClient
+                from azure.mgmt.resource.resources import ResourceManagementClient
 
                 resource_client = session.get_client(ResourceManagementClient, sub_id)
                 redundancy_types = {
