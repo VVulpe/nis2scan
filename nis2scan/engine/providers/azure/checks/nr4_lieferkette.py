@@ -25,23 +25,6 @@ BSIG_30_TEXT = (
 MAX_CREDENTIAL_AGE_DAYS = 90
 
 
-async def _fetch_all_pages(request_builder: Any) -> list[Any]:
-    """Fetch all pages of a Microsoft Graph list response via odata_next_link.
-
-    Graph API list endpoints (users, applications, ...) page results server-side;
-    without following odata_next_link, only the first page is evaluated.
-    """
-    items: list[Any] = []
-    response = await request_builder.get()
-    while response and response.value:
-        items.extend(response.value)
-        next_link = getattr(response, "odata_next_link", None)
-        if not next_link:
-            break
-        response = await request_builder.with_url(next_link).get()
-    return items
-
-
 class CheckLighthouseDelegations(BaseCheck):
     """Check that Azure Lighthouse delegations are audited."""
 
@@ -155,27 +138,30 @@ class CheckGuestUsersConditionalAccess(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
-
-            graph_client = GraphServiceClient(session.credential)
+            from nis2scan.engine.providers.azure import graph
 
             # Check for guest users (paginated — a tenant may have more than one page of users)
-            users = await _fetch_all_pages(graph_client.users)
-            guest_users = [u for u in users if u.user_type and str(u.user_type).lower() == "guest"]
+            users = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/users?$select=id,userType&$top=999"
+            )
+            guest_users = [u for u in users if u.get("userType") and str(u.get("userType")).lower() == "guest"]
 
             if not guest_users:
                 return CheckResult(check_id=self.check_id, findings=findings, errors=errors)
 
             # Check if any CA policy targets guest users (paginated)
-            policies = await _fetch_all_pages(graph_client.identity.conditional_access.policies)
+            policies = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
+            )
 
             guest_ca_found = False
             for policy in policies:
-                if policy.state and str(policy.state).lower() == "enabled":
-                    conditions = policy.conditions
-                    if conditions and conditions.users:
-                        include_users = conditions.users.include_users or []
-                        include_guest = conditions.users.include_guests_or_external_users
+                if policy.get("state") and str(policy.get("state")).lower() == "enabled":
+                    conditions = policy.get("conditions")
+                    users_cond = conditions.get("users") if conditions else None
+                    if users_cond:
+                        include_users = users_cond.get("includeUsers") or []
+                        include_guest = users_cond.get("includeGuestsOrExternalUsers")
                         if "All" in include_users or "GuestsOrExternalUsers" in include_users or include_guest:
                             guest_ca_found = True
                             break
@@ -360,19 +346,22 @@ class CheckServicePrincipalCredentials(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
             # Paginated — a tenant may have more than one page of app registrations
-            applications = await _fetch_all_pages(graph_client.applications)
+            applications = await graph.graph_get_all(
+                session.credential,
+                "https://graph.microsoft.com/v1.0/applications?$select=id,displayName,passwordCredentials&$top=999",
+            )
 
             threshold = datetime.now(UTC) - timedelta(days=MAX_CREDENTIAL_AGE_DAYS)
             old_creds_count = 0
 
             for app in applications:
-                password_creds = app.password_credentials or []
+                password_creds = app.get("passwordCredentials") or []
                 for cred in password_creds:
-                    if cred.start_date_time and cred.start_date_time < threshold:
+                    start_raw = cred.get("startDateTime")
+                    if start_raw and datetime.fromisoformat(start_raw) < threshold:
                         old_creds_count += 1
                         break  # Count each app once
 

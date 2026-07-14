@@ -12,6 +12,41 @@ from typing import Any
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 
 
+async def graph_get(
+    credential: Any,
+    url: str,
+    timeout: float = 30.0,
+    transport: Any = None,
+) -> dict[str, Any]:
+    """GET a single Graph object (non-collection endpoint).
+
+    Args:
+        credential: azure.identity sync TokenCredential (as held by AzureSession).
+        url: Absolute Graph object URL (v1.0 or beta).
+        timeout: Per-request timeout in seconds.
+        transport: Optional httpx transport override (tests use MockTransport).
+
+    Returns:
+        The object as a dict (camelCase wire keys).
+
+    Raises:
+        httpx.HTTPStatusError: On non-2xx responses (checks convert this to
+        CheckError — fail-safe per ADR-0016).
+    """
+    import asyncio
+
+    import httpx
+
+    token = await asyncio.to_thread(credential.get_token, GRAPH_SCOPE)
+    headers = {"Authorization": f"Bearer {token.token}"}
+
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+        payload: dict[str, Any] = response.json()
+        return payload
+
+
 async def graph_get_all(
     credential: Any,
     url: str,

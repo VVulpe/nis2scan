@@ -46,18 +46,20 @@ class CheckConditionalAccess(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
-            policies_response = await graph_client.identity.conditional_access.policies.get()
-            policies = policies_response.value if policies_response and policies_response.value else []
+            policies = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
+            )
 
             # Only state == "enabled" actually enforces access. Report-only policies
             # (enabledForReportingButNotEnforced) log but never block access, so they
             # do not count as positive evidence.
-            enforced_policies = [p for p in policies if p.state and str(p.state).lower() == "enabled"]
+            enforced_policies = [p for p in policies if p.get("state") and str(p.get("state")).lower() == "enabled"]
             report_only_policies = [
-                p for p in policies if p.state and str(p.state).lower() == "enabledforreportingbutnotenforced"
+                p
+                for p in policies
+                if p.get("state") and str(p.get("state")).lower() == "enabledforreportingbutnotenforced"
             ]
 
             if enforced_policies:
@@ -155,11 +157,12 @@ class CheckPim(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
-            eligible_response = await graph_client.role_management.directory.role_eligibility_schedule_instances.get()
-            eligible = eligible_response.value if eligible_response and eligible_response.value else []
+            eligible = await graph.graph_get_all(
+                session.credential,
+                "https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilityScheduleInstances",
+            )
 
             if eligible:
                 findings.append(
@@ -555,13 +558,14 @@ class CheckGuestAccessRestrictions(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
-            auth_policy = await graph_client.policies.authorization_policy.get()
+            auth_policy = await graph.graph_get(
+                session.credential, "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
+            )
 
-            if auth_policy and auth_policy.guest_user_role_id:
-                guest_role = str(auth_policy.guest_user_role_id)
+            if auth_policy and auth_policy.get("guestUserRoleId"):
+                guest_role = str(auth_policy.get("guestUserRoleId"))
                 if guest_role != self.PERMISSIVE_GUEST_ROLE:
                     findings.append(
                         compliant_finding(

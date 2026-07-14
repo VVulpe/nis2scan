@@ -44,7 +44,6 @@ dependencies = [
     "azure-mgmt-policyinsights>=1.0.0",
     "azure-mgmt-loganalytics>=13.0.0",
     "azure-mgmt-managementgroups>=2.0.0",
-    "msgraph-sdk>=1.0.0",
     "google-auth>=2.29.0",
     "google-cloud-resource-manager>=1.12.0",
     "google-cloud-compute>=1.18.0",

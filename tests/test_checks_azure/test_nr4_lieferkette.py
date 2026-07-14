@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,15 +25,6 @@ def _compliant(result):
 
 def _maengel(result):
     return [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
-
-
-@pytest.fixture
-def graph_client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    import msgraph
-
-    client = MagicMock()
-    monkeypatch.setattr(msgraph, "GraphServiceClient", lambda credential: client)
-    return client
 
 
 class TestCheckLighthouseDelegations:
@@ -59,27 +50,34 @@ class TestCheckLighthouseDelegations:
 
 
 class TestCheckGuestUsersConditionalAccess:
-    def _setup_graph(self, graph_client: MagicMock, guests: bool, ca_for_guests: bool) -> None:
-        users = [SimpleNamespace(user_type="Guest")] if guests else [SimpleNamespace(user_type="Member")]
-        graph_client.users.get = AsyncMock(return_value=SimpleNamespace(value=users))
-        policies = []
+    def _setup_graph(self, monkeypatch: pytest.MonkeyPatch, guests: bool, ca_for_guests: bool) -> None:
+        from nis2scan.engine.providers.azure import graph
+
+        users = [{"id": "u-1", "userType": "Guest"}] if guests else [{"id": "u-1", "userType": "Member"}]
+        policies: list[dict] = []
         if ca_for_guests:
             policies = [
-                SimpleNamespace(
-                    state="enabled",
-                    conditions=SimpleNamespace(
-                        users=SimpleNamespace(
-                            include_users=["All"],
-                            include_groups=[],
-                            include_guests_or_external_users=None,
-                        )
-                    ),
-                )
+                {
+                    "state": "enabled",
+                    "conditions": {
+                        "users": {
+                            "includeUsers": ["All"],
+                            "includeGroups": [],
+                            "includeGuestsOrExternalUsers": None,
+                        }
+                    },
+                }
             ]
-        graph_client.identity.conditional_access.policies.get = AsyncMock(return_value=SimpleNamespace(value=policies))
 
-    def test_guests_with_ca_produce_positive_evidence(self, graph_client: MagicMock):
-        self._setup_graph(graph_client, guests=True, ca_for_guests=True)
+        async def fake_get_all(credential, url, timeout=30.0):
+            if "conditionalAccess" in url:
+                return policies
+            return users
+
+        monkeypatch.setattr(graph, "graph_get_all", fake_get_all)
+
+    def test_guests_with_ca_produce_positive_evidence(self, monkeypatch: pytest.MonkeyPatch):
+        self._setup_graph(monkeypatch, guests=True, ca_for_guests=True)
         session = FakeAzureSession()
 
         result = asyncio.run(CheckGuestUsersConditionalAccess().execute(session))
@@ -87,8 +85,8 @@ class TestCheckGuestUsersConditionalAccess:
         assert len(_compliant(result)) == 1
         assert not _maengel(result)
 
-    def test_guests_without_ca_produce_finding(self, graph_client: MagicMock):
-        self._setup_graph(graph_client, guests=True, ca_for_guests=False)
+    def test_guests_without_ca_produce_finding(self, monkeypatch: pytest.MonkeyPatch):
+        self._setup_graph(monkeypatch, guests=True, ca_for_guests=False)
         session = FakeAzureSession()
 
         result = asyncio.run(CheckGuestUsersConditionalAccess().execute(session))
@@ -96,8 +94,8 @@ class TestCheckGuestUsersConditionalAccess:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
-    def test_no_guests_yields_no_findings(self, graph_client: MagicMock):
-        self._setup_graph(graph_client, guests=False, ca_for_guests=False)
+    def test_no_guests_yields_no_findings(self, monkeypatch: pytest.MonkeyPatch):
+        self._setup_graph(monkeypatch, guests=False, ca_for_guests=False)
         session = FakeAzureSession()
 
         result = asyncio.run(CheckGuestUsersConditionalAccess().execute(session))
@@ -105,24 +103,31 @@ class TestCheckGuestUsersConditionalAccess:
         assert not result.findings
         assert not result.errors
 
-    def test_ca_policy_with_only_include_groups_produces_no_positive_evidence(self, graph_client: MagicMock):
+    def test_ca_policy_with_only_include_groups_produces_no_positive_evidence(self, monkeypatch: pytest.MonkeyPatch):
         # A CA policy that targets guests only via group membership must not count as
         # covering guests (B-Nr.4-8) — group membership is not evaluated by this check.
-        users = [SimpleNamespace(user_type="Guest")]
-        graph_client.users.get = AsyncMock(return_value=SimpleNamespace(value=users))
+        from nis2scan.engine.providers.azure import graph
+
+        users = [{"id": "u-1", "userType": "Guest"}]
         policies = [
-            SimpleNamespace(
-                state="enabled",
-                conditions=SimpleNamespace(
-                    users=SimpleNamespace(
-                        include_users=[],
-                        include_groups=["some-group-id"],
-                        include_guests_or_external_users=None,
-                    )
-                ),
-            )
+            {
+                "state": "enabled",
+                "conditions": {
+                    "users": {
+                        "includeUsers": [],
+                        "includeGroups": ["some-group-id"],
+                        "includeGuestsOrExternalUsers": None,
+                    }
+                },
+            }
         ]
-        graph_client.identity.conditional_access.policies.get = AsyncMock(return_value=SimpleNamespace(value=policies))
+
+        async def fake_get_all(credential, url, timeout=30.0):
+            if "conditionalAccess" in url:
+                return policies
+            return users
+
+        monkeypatch.setattr(graph, "graph_get_all", fake_get_all)
         session = FakeAzureSession()
 
         result = asyncio.run(CheckGuestUsersConditionalAccess().execute(session))
@@ -154,15 +159,25 @@ class TestCheckPrivateEndpoints:
 
 
 class TestCheckServicePrincipalCredentials:
-    def _setup_apps(self, graph_client: MagicMock, cred_age_days: int) -> None:
-        start = datetime.now(UTC) - timedelta(days=cred_age_days)
-        apps = [
-            SimpleNamespace(password_credentials=[SimpleNamespace(start_date_time=start)]),
-        ]
-        graph_client.applications.get = AsyncMock(return_value=SimpleNamespace(value=apps))
+    def _setup_apps(self, monkeypatch: pytest.MonkeyPatch, cred_age_days: int) -> None:
+        from nis2scan.engine.providers.azure import graph
 
-    def test_fresh_credentials_produce_positive_evidence(self, graph_client: MagicMock):
-        self._setup_apps(graph_client, cred_age_days=10)
+        start = (datetime.now(UTC) - timedelta(days=cred_age_days)).isoformat()
+        apps = [
+            {
+                "id": "app-1",
+                "displayName": "app-1",
+                "passwordCredentials": [{"startDateTime": start}],
+            },
+        ]
+
+        async def fake_get_all(credential, url, timeout=30.0):
+            return apps
+
+        monkeypatch.setattr(graph, "graph_get_all", fake_get_all)
+
+    def test_fresh_credentials_produce_positive_evidence(self, monkeypatch: pytest.MonkeyPatch):
+        self._setup_apps(monkeypatch, cred_age_days=10)
         session = FakeAzureSession()
 
         result = asyncio.run(CheckServicePrincipalCredentials().execute(session))
@@ -170,8 +185,8 @@ class TestCheckServicePrincipalCredentials:
         assert len(_compliant(result)) == 1
         assert not _maengel(result)
 
-    def test_old_credentials_produce_finding(self, graph_client: MagicMock):
-        self._setup_apps(graph_client, cred_age_days=200)
+    def test_old_credentials_produce_finding(self, monkeypatch: pytest.MonkeyPatch):
+        self._setup_apps(monkeypatch, cred_age_days=200)
         session = FakeAzureSession()
 
         result = asyncio.run(CheckServicePrincipalCredentials().execute(session))
