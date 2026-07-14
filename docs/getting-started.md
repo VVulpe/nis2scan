@@ -529,6 +529,16 @@ premium code — only the entry-point plugin loader (`nis2scan.plugins`).
 
 ## Troubleshooting
 
+### `pip install` says "No matching distribution found for nis2scan"
+
+Your default Python is older than 3.12 (check with `python --version`) — pip
+then hides all nis2scan versions because of their `Requires-Python >=3.12`
+marker. Install with a modern interpreter, e.g. on Windows:
+
+```powershell
+py -3.13 -m pip install nis2scan
+```
+
 ### `pip install` fails on Windows with `OSError: [Errno 2] ...msgraph\generated\...`
 
 Windows long-path support is disabled (the default). See
