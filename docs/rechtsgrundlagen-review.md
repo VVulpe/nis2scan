@@ -257,3 +257,33 @@ Verlaufsabschnitte (Batches Nr. 4–10) und der Kampagnen-Bilanz.
   Break-Glass-Zählung ≥2/1/0 (AZ-NR10-005); GCP-Paginierung über 100 Nutzer hinaus;
   einheitliche Fehlerklassifikation (Service-Disabled vs. 403→CheckError);
   GCP-NR10-005 auf Namensheuristik rewidmet.
+
+#### Delta-Review AZ-NR9-007 — Umstellung auf Graph-Beta-Report (2026-07-14)
+
+- Anlass: Der W4-geprüfte Stand las `sp.sign_in_activity` vom Graph-v1.0-
+  servicePrincipal-Modell — das Attribut existiert dort nicht (Check konnte
+  live nie ein Ergebnis liefern); zudem widersprachen die pruefgrenzen
+  (Credential-Alter) der tatsächlichen Prüflogik (Sign-in-Daten).
+- Neu (Branch `az-nr9-signin-activity`): letzte Anmeldung aus
+  `GET /beta/reports/servicePrincipalSignInActivities`, SP-Population aus
+  `GET /v1.0/servicePrincipals`; direkter REST-Zugriff über neues Modul
+  `engine/providers/azure/graph.py` (httpx, @odata-Paginierung). Prüfaussage,
+  title, description, severity, required_permissions unverändert.
+- **Erstprüfung (538a8d6) FAIL** — legal-reviewer, 2 Beanstandungen + 4 Zweifel:
+  B1 pruefgrenzen behaupteten vollständigen First-Party-Ausschluss, Code
+  schloss nur den Microsoft-Services-Tenant aus; B2 Remediation zeigte auf
+  App-Registrierungen statt Unternehmensanwendungen; Z1 `$top=999` über dem
+  dokumentierten Seitenmaximum 100; Z2 scheinbar abschließende Ursachenliste;
+  Z3 Beta-Offenlegung zu weich; Z4 stiller Lauf bei leerer Prüfpopulation.
+- **Nachprüfung (5cdc101) PASS** — B1 (beide MS-Tenants, `MS_TENANT_IDS`,
+  GUID-verifiziert), B2, Z1 ($top=100), Z2 („z. B."), Z3 („ohne
+  Produktions-Support") umgesetzt; Z4 bleibt dokumentierter Hinweis
+  (Musterlücke analog Dossier-Punkt 17, kein falscher Nachweis; spätere
+  einheitliche NOT_APPLICABLE-Lösung über alle Provider vorgemerkt).
+- **Merge-Bedingungen:** (a) grüner Live-Integrationslauf AZ-NR9-007 gegen
+  echten Tenant nach Admin-Consent für `AuditLog.Read.All` der CI-App
+  (Terraform vorbereitet, `infra/azure/oidc/main.tf`); (b) Gründer-Vermerk.
+- **Gründer-Vermerk: ERTEILT (Chat-Freigabe 14.07.2026)** — nach Zweitprüfung PASS
+  (Nachprüfung 5cdc101) und grünem Live-Integrationslauf (Run 29338070278,
+  51/51 bestanden; AZ-NR9-007 liefert echte Graph-Ergebnisse, Admin-Consent
+  AuditLog.Read.All erteilt). Beide ADR-0018-Vermerke liegen vor — Merge frei.

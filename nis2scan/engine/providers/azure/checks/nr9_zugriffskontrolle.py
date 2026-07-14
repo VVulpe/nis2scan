@@ -625,7 +625,7 @@ class CheckGuestAccessRestrictions(BaseCheck):
 
 
 class CheckStaleServicePrincipals(BaseCheck):
-    """Check for service principals inactive for more than 90 days."""
+    """Check for service principals inactive for more than 90 days (Graph beta report)."""
 
     check_id = "AZ-NR9-007"
     title = "Inaktive Service Principals (>90 Tage)"
@@ -634,9 +634,26 @@ class CheckStaleServicePrincipals(BaseCheck):
     provider = CloudProvider.AZURE
     required_permissions = ["Application.Read.All", "AuditLog.Read.All"]
     pruefgrenzen = (
-        "Bewertet Inaktivität über das Credential-Alter der Service Principals "
-        "(Graph API). Die tatsächliche letzte Nutzung ist nur über Sign-in-Logs "
-        "mit Premium-Lizenz ermittelbar und wird hier nicht geprüft."
+        "Ermittelt die letzte Anmeldung je Service Principal über den "
+        "Microsoft-Graph-Report servicePrincipalSignInActivities (Beta-Endpoint; "
+        "von Microsoft ohne Produktions-Support bereitgestellt und jederzeit "
+        "änderbar). Service Principals ohne Sign-in-Datensatz — z. B. nie "
+        "verwendete oder solche außerhalb des Log-Horizonts des Tenants — "
+        "werden als nicht bewertbar gemeldet, nie als konform. Service "
+        "Principals aus den beiden Microsoft-eigenen Tenants (Microsoft "
+        "Services, Microsoft-Erstanbieter-Apps) sind ausgenommen."
+    )
+
+    # Documented maximum page size for /servicePrincipals is 100.
+    SP_URL = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,appOwnerOrganizationId&$top=100"
+    SIGNIN_REPORT_URL = "https://graph.microsoft.com/beta/reports/servicePrincipalSignInActivities"
+    # Microsoft-owned tenants hosting first-party apps (B1, legal review):
+    # f8cdef31… = Microsoft Services, 72f988bf… = Microsoft first-party apps.
+    MS_TENANT_IDS = frozenset(
+        {
+            "f8cdef31-a31e-4b4a-93e4-5f571e91255a",
+            "72f988bf-86f1-41af-91ab-2d7cd011db47",
+        }
     )
 
     async def execute(self, session: Any) -> CheckResult:
@@ -644,11 +661,17 @@ class CheckStaleServicePrincipals(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
-            sp_response = await graph_client.service_principals.get()
-            service_principals = sp_response.value if sp_response and sp_response.value else []
+            service_principals = await graph.graph_get_all(session.credential, self.SP_URL)
+            activities = await graph.graph_get_all(session.credential, self.SIGNIN_REPORT_URL)
+
+            last_sign_in_by_app: dict[str, datetime] = {}
+            for activity in activities:
+                app_id = activity.get("appId")
+                last_raw = (activity.get("lastSignInActivity") or {}).get("lastSignInDateTime")
+                if app_id and last_raw:
+                    last_sign_in_by_app[app_id] = datetime.fromisoformat(last_raw)
 
             threshold = datetime.now(UTC) - timedelta(days=MAX_INACTIVE_DAYS)
             stale_count = 0
@@ -656,20 +679,18 @@ class CheckStaleServicePrincipals(BaseCheck):
             unknown_count = 0
 
             for sp in service_principals:
-                # Skip Microsoft first-party apps
-                ms_tenant_id = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
-                if sp.app_owner_organization_id and str(sp.app_owner_organization_id) == ms_tenant_id:
+                # Skip Microsoft first-party apps (both MS-owned tenants)
+                if sp.get("appOwnerOrganizationId") in self.MS_TENANT_IDS:
                     continue
 
-                # signInActivity is not part of the generated v1.0 model on
-                # every msgraph-sdk release; absence surfaces as CheckError
-                # (fail-safe, ADR-0016) — never as a silent pass.
-                sign_in = sp.sign_in_activity  # type: ignore[attr-defined, unused-ignore]
-                if sign_in and sign_in.last_sign_in_date_time:
+                last_sign_in = last_sign_in_by_app.get(sp.get("appId", ""))
+                if last_sign_in:
                     evaluated_count += 1
-                    if sign_in.last_sign_in_date_time < threshold:
+                    if last_sign_in < threshold:
                         stale_count += 1
                 else:
+                    # No report entry: never signed in or outside the tenant's
+                    # log horizon — not evaluable (fail-safe, ADR-0016).
                     unknown_count += 1
 
             if evaluated_count and unknown_count == 0 and stale_count == 0:
@@ -689,7 +710,8 @@ class CheckStaleServicePrincipals(BaseCheck):
                         current_state={"stale_service_principals": 0, "evaluated": evaluated_count},
                         expected_state=f"Keine Service Principals > {MAX_INACTIVE_DAYS} Tage inaktiv",
                         audit_evidence=(
-                            f"Graph API: 0/{evaluated_count} service principals inactive > {MAX_INACTIVE_DAYS} days"
+                            f"Graph beta report servicePrincipalSignInActivities: "
+                            f"0/{evaluated_count} service principals inactive > {MAX_INACTIVE_DAYS} days"
                         ),
                         iso27001_control="A.5.15 Zugriffskontrolle",
                     )
@@ -716,12 +738,15 @@ class CheckStaleServicePrincipals(BaseCheck):
                         current_state={"stale_service_principals": stale_count},
                         expected_state=f"Keine Service Principals > {MAX_INACTIVE_DAYS} Tage inaktiv",
                         remediation=(
-                            "Überprüfen und entfernen Sie nicht genutzte Service Principals: "
-                            "Entra Admin Center → App-Registrierungen → Nach Inaktivität filtern"
+                            "Überprüfen und entfernen bzw. deaktivieren Sie nicht genutzte "
+                            "Service Principals: Entra Admin Center → Unternehmensanwendungen; "
+                            "letzte Nutzung über Anmeldeprotokolle → "
+                            "Dienstprinzipal-Anmeldungen abgleichen"
                         ),
                         remediation_effort="MEDIUM",
                         audit_evidence=(
-                            f"Graph API: {stale_count}/{len(service_principals)} "
+                            f"Graph beta report servicePrincipalSignInActivities: "
+                            f"{stale_count}/{evaluated_count} evaluated "
                             f"service principals inactive > {MAX_INACTIVE_DAYS} days"
                         ),
                     )
@@ -733,8 +758,9 @@ class CheckStaleServicePrincipals(BaseCheck):
                         check_id=self.check_id,
                         error_type="InconclusiveState",
                         message=(
-                            f"{unknown_count} Service Principal(s) ohne auswertbare Sign-in-Daten — "
-                            "nicht bewertbar (AuditLog.Read.All/Premium erforderlich)"
+                            f"{unknown_count} Service Principal(s) ohne Eintrag im Graph-Report "
+                            "servicePrincipalSignInActivities — nicht bewertbar (z. B. nie "
+                            "angemeldet oder außerhalb des Log-Horizonts des Tenants)"
                         ),
                         region="global",
                     )
