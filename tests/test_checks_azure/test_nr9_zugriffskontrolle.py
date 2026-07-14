@@ -242,45 +242,104 @@ class TestCheckGuestAccessRestrictions:
 
 
 class TestCheckStaleServicePrincipals:
-    def _setup(self, graph_client: MagicMock, last_sign_in_days: int | None) -> None:
-        sign_in = (
-            SimpleNamespace(last_sign_in_date_time=datetime.now(UTC) - timedelta(days=last_sign_in_days))
-            if last_sign_in_days is not None
-            else None
-        )
-        sps = [SimpleNamespace(app_owner_organization_id=None, sign_in_activity=sign_in)]
-        graph_client.service_principals.get = AsyncMock(return_value=SimpleNamespace(value=sps))
+    MS_TENANT = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
 
-    def test_active_sps_produce_positive_evidence(self, graph_client: MagicMock):
-        self._setup(graph_client, last_sign_in_days=5)
+    def _setup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        sps: list[dict],
+        activities: list[dict],
+    ) -> None:
+        from nis2scan.engine.providers.azure import graph
+
+        async def fake_get_all(credential, url, timeout=30.0):
+            if "servicePrincipalSignInActivities" in url:
+                return activities
+            return sps
+
+        monkeypatch.setattr(graph, "graph_get_all", fake_get_all)
+
+    @staticmethod
+    def _activity(app_id: str, days_ago: int) -> dict:
+        last = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+        return {"appId": app_id, "lastSignInActivity": {"lastSignInDateTime": last}}
+
+    def test_active_sps_produce_positive_evidence(self, monkeypatch: pytest.MonkeyPatch):
+        self._setup(
+            monkeypatch,
+            sps=[{"appId": "app-1", "appOwnerOrganizationId": None}],
+            activities=[self._activity("app-1", days_ago=5)],
+        )
 
         result = asyncio.run(CheckStaleServicePrincipals().execute(FakeAzureSession()))
 
         assert len(_compliant(result)) == 1
         assert not _maengel(result)
 
-    def test_stale_sp_produces_finding(self, graph_client: MagicMock):
-        self._setup(graph_client, last_sign_in_days=200)
+    def test_stale_sp_produces_finding(self, monkeypatch: pytest.MonkeyPatch):
+        self._setup(
+            monkeypatch,
+            sps=[{"appId": "app-1", "appOwnerOrganizationId": None}],
+            activities=[self._activity("app-1", days_ago=200)],
+        )
 
         result = asyncio.run(CheckStaleServicePrincipals().execute(FakeAzureSession()))
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
-    def test_unknown_sign_in_yields_no_evidence(self, graph_client: MagicMock):
-        # ADR-0016: SPs without sign-in data are unknown — no positive evidence.
-        self._setup(graph_client, last_sign_in_days=None)
+    def test_unknown_sign_in_yields_no_evidence(self, monkeypatch: pytest.MonkeyPatch):
+        # ADR-0016: SPs without a report entry are unknown — no positive evidence.
+        self._setup(
+            monkeypatch,
+            sps=[{"appId": "app-1", "appOwnerOrganizationId": None}],
+            activities=[],
+        )
 
         result = asyncio.run(CheckStaleServicePrincipals().execute(FakeAzureSession()))
 
         assert not result.findings
 
-    def test_unknown_sign_in_produces_check_error(self, graph_client: MagicMock):
+    def test_unknown_sign_in_produces_check_error(self, monkeypatch: pytest.MonkeyPatch):
         # B-9-8: unknown_count > 0 must surface as an InconclusiveState CheckError,
         # not stay silent.
-        self._setup(graph_client, last_sign_in_days=None)
+        self._setup(
+            monkeypatch,
+            sps=[{"appId": "app-1", "appOwnerOrganizationId": None}],
+            activities=[],
+        )
 
         result = asyncio.run(CheckStaleServicePrincipals().execute(FakeAzureSession()))
 
         assert len(result.errors) == 1
         assert result.errors[0].error_type == "InconclusiveState"
+
+    def test_microsoft_first_party_apps_are_excluded(self, monkeypatch: pytest.MonkeyPatch):
+        # MS-owned SPs without sign-in data must not trigger InconclusiveState.
+        self._setup(
+            monkeypatch,
+            sps=[
+                {"appId": "ms-app", "appOwnerOrganizationId": self.MS_TENANT},
+                {"appId": "app-1", "appOwnerOrganizationId": None},
+            ],
+            activities=[self._activity("app-1", days_ago=5)],
+        )
+
+        result = asyncio.run(CheckStaleServicePrincipals().execute(FakeAzureSession()))
+
+        assert len(_compliant(result)) == 1
+        assert not result.errors
+
+    def test_graph_error_produces_check_error(self, monkeypatch: pytest.MonkeyPatch):
+        from nis2scan.engine.providers.azure import graph
+
+        async def failing_get_all(credential, url, timeout=30.0):
+            raise RuntimeError("Graph 403: AuditLog.Read.All fehlt")
+
+        monkeypatch.setattr(graph, "graph_get_all", failing_get_all)
+
+        result = asyncio.run(CheckStaleServicePrincipals().execute(FakeAzureSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
