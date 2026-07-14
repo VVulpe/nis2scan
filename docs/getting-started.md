@@ -38,21 +38,22 @@ python3 --version   # Must be 3.12+
 
 ### From PyPI (recommended)
 
+Requires Python 3.12+. Install into a virtual environment (best practice, and
+on Windows it also keeps installation paths short — see the note below):
+
 ```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate    Linux/macOS: source .venv/bin/activate
 pip install nis2scan
 ```
 
-> **Windows:** Installation requires long-path support (the Microsoft Graph SDK
-> ships files whose paths exceed the classic 260-character limit). Enable it
-> once as administrator, then reboot:
->
-> ```powershell
-> Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1
-> ```
->
-> Without it, `pip install nis2scan` fails with `OSError: [Errno 2] No such
-> file or directory: ...msgraph\generated\...`. Alternatively install inside
-> WSL, where the limit does not exist.
+> **Windows:** Install inside a venv as shown above. A `pip install --user`
+> with the Microsoft Store Python places packages under an extremely long
+> path; the Azure SDKs then exceed the classic 260-character limit and the
+> install fails with `OSError: [Errno 2] No such file or directory: ...`.
+> A venv in a short directory avoids this without any system changes;
+> enabling Windows long-path support (`LongPathsEnabled=1`, admin + reboot)
+> or installing under WSL also works.
 
 ### From source (development)
 
@@ -539,11 +540,13 @@ marker. Install with a modern interpreter, e.g. on Windows:
 py -3.13 -m pip install nis2scan
 ```
 
-### `pip install` fails on Windows with `OSError: [Errno 2] ...msgraph\generated\...`
+### `pip install` fails on Windows with `OSError: [Errno 2] No such file or directory: ...site-packages\...`
 
-Windows long-path support is disabled (the default). See
-[Installation](#installation) for the one-time registry fix, or install
-inside WSL.
+An installation path exceeded the classic 260-character Windows limit —
+typical for `pip install --user` with the Microsoft Store Python. Install
+into a venv in a short directory instead (see
+[Installation](#installation)), enable Windows long-path support
+(`LongPathsEnabled=1`, admin + reboot), or use WSL.
 
 ### "No AWS/Azure/GCP credentials found"
 

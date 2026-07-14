@@ -49,18 +49,15 @@ class CheckPasswordProtection(BaseCheck):
         )
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
-
-            graph_client = GraphServiceClient(session.credential)
+            from nis2scan.engine.providers.azure import graph
 
             # Password Protection lives in the "Password Rule Settings" groupSettings object
             # (Graph v1.0 /groupSettings), NOT in the authentication methods policy.
-            settings_response = await graph_client.group_settings.get()
-            settings = settings_response.value if settings_response and settings_response.value else []
+            settings = await graph.graph_get_all(session.credential, "https://graph.microsoft.com/v1.0/groupSettings")
 
             password_settings = None
             for setting in settings:
-                if str(getattr(setting, "display_name", "") or "") == "Password Rule Settings":
+                if str(setting.get("displayName", "") or "") == "Password Rule Settings":
                     password_settings = setting
                     break
 
@@ -95,14 +92,14 @@ class CheckPasswordProtection(BaseCheck):
                     )
                 )
             else:
-                setting_id = getattr(password_settings, "id", None)
+                setting_id = password_settings.get("id")
                 resource_id = f"/groupSettings/{setting_id}" if setting_id else "/groupSettings"
 
                 setting_values: dict[str, str] = {}
-                for value in getattr(password_settings, "values", None) or []:
-                    name = getattr(value, "name", None)
+                for value in password_settings.get("values") or []:
+                    name = value.get("name")
                     if name is not None:
-                        setting_values[str(name)] = str(getattr(value, "value", "") or "")
+                        setting_values[str(name)] = str(value.get("value", "") or "")
 
                 check_enabled = setting_values.get("EnableBannedPasswordCheck", "").strip().lower() == "true"
                 banned_list = setting_values.get("BannedPasswordList", "")
@@ -216,13 +213,14 @@ class CheckSecurityDefaults(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
-
-            graph_client = GraphServiceClient(session.credential)
+            from nis2scan.engine.providers.azure import graph
 
             # Check Security Defaults
-            security_defaults = await graph_client.policies.identity_security_defaults_enforcement_policy.get()
-            sd_enabled = security_defaults.is_enabled if security_defaults else False
+            security_defaults = await graph.graph_get(
+                session.credential,
+                "https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy",
+            )
+            sd_enabled = security_defaults.get("isEnabled") if security_defaults else False
 
             if sd_enabled:
                 # Security Defaults are enabled — baseline is met (ADR-0006: positive evidence)
@@ -248,17 +246,18 @@ class CheckSecurityDefaults(BaseCheck):
 
             # Security Defaults disabled — check for CA policies that actually require MFA as replacement.
             # Only enabled policies with an "mfa" grant control count as an equivalent baseline.
-            policies_response = await graph_client.identity.conditional_access.policies.get()
-            policies = policies_response.value if policies_response and policies_response.value else []
+            policies = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
+            )
 
             mfa_policies = []
             for policy in policies:
-                if not policy.state or str(policy.state).lower() != "enabled":
+                if not policy.get("state") or str(policy.get("state")).lower() != "enabled":
                     continue
-                grant = policy.grant_controls
-                if not grant or not grant.built_in_controls:
+                grant = policy.get("grantControls")
+                if not grant or not grant.get("builtInControls"):
                     continue
-                if "mfa" in [str(c).lower() for c in grant.built_in_controls]:
+                if "mfa" in [str(c).lower() for c in grant.get("builtInControls")]:
                     mfa_policies.append(policy)
 
             if mfa_policies:

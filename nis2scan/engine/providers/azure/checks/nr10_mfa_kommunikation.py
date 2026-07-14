@@ -45,35 +45,37 @@ class CheckMfaAllUsers(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
-            policies_response = await graph_client.identity.conditional_access.policies.get()
-            policies = policies_response.value if policies_response and policies_response.value else []
+            policies = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
+            )
 
             mfa_all_users = False
             excluded_count = 0
             for policy in policies:
-                if policy.state and str(policy.state).lower() != "enabled":
+                state = policy.get("state")
+                if state and str(state).lower() != "enabled":
                     continue
 
                 # Check if policy requires MFA
-                grant = policy.grant_controls
-                if not grant or not grant.built_in_controls:
+                grant = policy.get("grantControls")
+                if not grant or not grant.get("builtInControls"):
                     continue
-                requires_mfa = "mfa" in [str(c).lower() for c in grant.built_in_controls]
+                requires_mfa = "mfa" in [str(c).lower() for c in grant.get("builtInControls")]
                 if not requires_mfa:
                     continue
 
                 # Check if policy targets all users
-                conditions = policy.conditions
-                if not conditions or not conditions.users:
+                conditions = policy.get("conditions")
+                if not conditions or not conditions.get("users"):
                     continue
-                include_users = conditions.users.include_users or []
+                users_cond = conditions.get("users")
+                include_users = users_cond.get("includeUsers") or []
                 if "All" not in include_users:
                     continue
 
-                exclude_users = conditions.users.exclude_users or []
+                exclude_users = users_cond.get("excludeUsers") or []
                 mfa_all_users = True
                 excluded_count = len(exclude_users)
                 break
@@ -179,16 +181,18 @@ class CheckPhishingResistantMfa(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
-            methods_policy = await graph_client.policies.authentication_methods_policy.get()
+            methods_policy = await graph.graph_get(
+                session.credential, "https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy"
+            )
 
             fido2_enabled = False
-            if methods_policy and methods_policy.authentication_method_configurations:
-                for config in methods_policy.authentication_method_configurations:
-                    config_id = str(config.id or "").lower()
-                    config_state = str(config.state or "").lower()
+            configs = methods_policy.get("authenticationMethodConfigurations") if methods_policy else None
+            if configs:
+                for config in configs:
+                    config_id = str(config.get("id") or "").lower()
+                    config_state = str(config.get("state") or "").lower()
                     if config_id == "fido2" and config_state == "enabled":
                         fido2_enabled = True
                         break
@@ -394,30 +398,32 @@ class CheckO365TlsEnforcement(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+            from nis2scan.engine.providers.azure import graph
 
-            graph_client = GraphServiceClient(session.credential)
-            policies_response = await graph_client.identity.conditional_access.policies.get()
-            policies = policies_response.value if policies_response and policies_response.value else []
+            policies = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
+            )
 
             o365_ca_found = False
             for policy in policies:
-                if policy.state and str(policy.state).lower() != "enabled":
+                state = policy.get("state")
+                if state and str(state).lower() != "enabled":
                     continue
 
-                conditions = policy.conditions
-                if not conditions or not conditions.applications:
+                conditions = policy.get("conditions")
+                if not conditions or not conditions.get("applications"):
                     continue
 
-                include_apps = conditions.applications.include_applications or []
+                apps_cond = conditions.get("applications")
+                include_apps = apps_cond.get("includeApplications") or []
                 # Check if policy targets O365 apps
                 targets_o365 = "All" in include_apps or any(app in self.O365_APP_IDS for app in include_apps)
 
                 if targets_o365:
                     # Check if policy has device compliance or approved app requirement
-                    grant = policy.grant_controls
-                    if grant and grant.built_in_controls:
-                        controls = [str(c).lower() for c in grant.built_in_controls]
+                    grant = policy.get("grantControls")
+                    if grant and grant.get("builtInControls"):
+                        controls = [str(c).lower() for c in grant.get("builtInControls")]
                         if "compliantdevice" in controls or "approvedapplication" in controls or "mfa" in controls:
                             o365_ca_found = True
                             break
@@ -503,31 +509,34 @@ class CheckBreakGlassAccounts(BaseCheck):
         errors: list[CheckError] = []
 
         try:
-            from msgraph import GraphServiceClient  # type: ignore[attr-defined]
-
-            graph_client = GraphServiceClient(session.credential)
+            from nis2scan.engine.providers.azure import graph
 
             # Check for permanent Global Admin role assignments
-            assignments_response = await graph_client.role_management.directory.role_assignments.get()
-            assignments = assignments_response.value if assignments_response and assignments_response.value else []
+            assignments = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            )
 
-            global_admin_assignments = [a for a in assignments if a.role_definition_id == GLOBAL_ADMIN_ROLE_ID]
+            global_admin_assignments = [a for a in assignments if a.get("roleDefinitionId") == GLOBAL_ADMIN_ROLE_ID]
 
             # Check CA policies for excluded users (break-glass accounts are typically excluded)
-            policies_response = await graph_client.identity.conditional_access.policies.get()
-            policies = policies_response.value if policies_response and policies_response.value else []
+            policies = await graph.graph_get_all(
+                session.credential, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
+            )
 
             # Collect all excluded user IDs across CA policies
             excluded_user_ids: set[str] = set()
             for policy in policies:
-                if policy.conditions and policy.conditions.users and policy.conditions.users.exclude_users:
-                    for user_id in policy.conditions.users.exclude_users:
+                conditions = policy.get("conditions")
+                users_cond = conditions.get("users") if conditions else None
+                exclude_users = users_cond.get("excludeUsers") if users_cond else None
+                if exclude_users:
+                    for user_id in exclude_users:
                         excluded_user_ids.add(user_id)
 
             # A break-glass account is: (1) a permanent Global Admin, (2) excluded from CA
             # policies. Count all matches (Option A) instead of stopping at the first hit —
             # Microsoft recommends at least two break-glass accounts.
-            break_glass_accounts = [a for a in global_admin_assignments if a.principal_id in excluded_user_ids]
+            break_glass_accounts = [a for a in global_admin_assignments if a.get("principalId") in excluded_user_ids]
             break_glass_count = len(break_glass_accounts)
             expected_state = "Mindestens zwei Break-Glass-Konten (permanente Global-Admin-Rolle mit CA-Ausschluss)"
 

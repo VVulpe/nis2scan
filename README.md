@@ -24,9 +24,9 @@ nis2scan scan --provider gcp
 
 **Detaillierte Anleitung:** [docs/getting-started.md](https://github.com/VVulpe/nis2scan/blob/main/docs/getting-started.md) — Installation, Cloud-Setup (AWS/Azure/GCP), Konfiguration, CLI-Referenz, Troubleshooting.
 
-> **Windows:** Die Installation benötigt aktivierten Long-Path-Support
-> (einmalige Registry-Einstellung, siehe
-> [Getting Started → Installation](https://github.com/VVulpe/nis2scan/blob/main/docs/getting-started.md#installation)).
+> **Windows:** Bitte in ein venv installieren (kurzer Pfad; Python 3.12+) —
+> Details und Troubleshooting siehe
+> [Getting Started → Installation](https://github.com/VVulpe/nis2scan/blob/main/docs/getting-started.md#installation).
 
 ---
 

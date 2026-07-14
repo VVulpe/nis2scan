@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -30,37 +30,55 @@ def _maengel(result):
 
 
 @pytest.fixture
-def graph_client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    import msgraph
+def graph_router(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """URL-routing fake for the Graph REST helper (graph_get_all / graph_get).
 
-    client = MagicMock()
-    monkeypatch.setattr(msgraph, "GraphServiceClient", lambda credential: client)
-    return client
+    Tests register wire-format (camelCase) fixture data by URL substring in
+    `.collections` (for graph_get_all) or `.objects` (for graph_get); the fakes
+    below dispatch on the first substring found in the requested URL — same
+    pattern as TestCheckStaleServicePrincipals's own `_setup`.
+    """
+    from nis2scan.engine.providers.azure import graph
+
+    router = SimpleNamespace(collections={}, objects={})
+
+    async def fake_get_all(credential, url, timeout=30.0):
+        for substring, value in router.collections.items():
+            if substring in url:
+                return value
+        raise AssertionError(f"No graph_get_all route registered for URL: {url}")
+
+    async def fake_get(credential, url, timeout=30.0):
+        for substring, value in router.objects.items():
+            if substring in url:
+                return value
+        raise AssertionError(f"No graph_get route registered for URL: {url}")
+
+    monkeypatch.setattr(graph, "graph_get_all", fake_get_all)
+    monkeypatch.setattr(graph, "graph_get", fake_get)
+
+    return router
 
 
 class TestCheckConditionalAccess:
-    def test_enabled_policy_produces_positive_evidence(self, graph_client: MagicMock):
-        graph_client.identity.conditional_access.policies.get = AsyncMock(
-            return_value=SimpleNamespace(value=[SimpleNamespace(state="enabled")])
-        )
+    def test_enabled_policy_produces_positive_evidence(self, graph_router: SimpleNamespace):
+        graph_router.collections["conditionalAccess"] = [{"state": "enabled"}]
         result = asyncio.run(CheckConditionalAccess().execute(FakeAzureSession()))
 
         assert len(_compliant(result)) == 1
         assert not _maengel(result)
 
-    def test_no_policies_produces_finding(self, graph_client: MagicMock):
-        graph_client.identity.conditional_access.policies.get = AsyncMock(return_value=SimpleNamespace(value=[]))
+    def test_no_policies_produces_finding(self, graph_router: SimpleNamespace):
+        graph_router.collections["conditionalAccess"] = []
         result = asyncio.run(CheckConditionalAccess().execute(FakeAzureSession()))
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
-    def test_report_only_policy_produces_finding_not_positive_evidence(self, graph_client: MagicMock):
+    def test_report_only_policy_produces_finding_not_positive_evidence(self, graph_router: SimpleNamespace):
         # B-9-6: enabledForReportingButNotEnforced does not enforce access, so it
         # must not count as positive evidence.
-        graph_client.identity.conditional_access.policies.get = AsyncMock(
-            return_value=SimpleNamespace(value=[SimpleNamespace(state="enabledForReportingButNotEnforced")])
-        )
+        graph_router.collections["conditionalAccess"] = [{"state": "enabledForReportingButNotEnforced"}]
         result = asyncio.run(CheckConditionalAccess().execute(FakeAzureSession()))
 
         maengel = _maengel(result)
@@ -70,19 +88,15 @@ class TestCheckConditionalAccess:
 
 
 class TestCheckPim:
-    def test_eligible_assignments_produce_positive_evidence(self, graph_client: MagicMock):
-        graph_client.role_management.directory.role_eligibility_schedule_instances.get = AsyncMock(
-            return_value=SimpleNamespace(value=[SimpleNamespace(id="pim-1")])
-        )
+    def test_eligible_assignments_produce_positive_evidence(self, graph_router: SimpleNamespace):
+        graph_router.collections["roleEligibilityScheduleInstances"] = [{"id": "pim-1"}]
         result = asyncio.run(CheckPim().execute(FakeAzureSession()))
 
         assert len(_compliant(result)) == 1
         assert not _maengel(result)
 
-    def test_no_pim_produces_finding(self, graph_client: MagicMock):
-        graph_client.role_management.directory.role_eligibility_schedule_instances.get = AsyncMock(
-            return_value=SimpleNamespace(value=[])
-        )
+    def test_no_pim_produces_finding(self, graph_router: SimpleNamespace):
+        graph_router.collections["roleEligibilityScheduleInstances"] = []
         result = asyncio.run(CheckPim().execute(FakeAzureSession()))
 
         assert len(_maengel(result)) == 1
@@ -219,21 +233,19 @@ class TestCheckClassicAdmins:
 class TestCheckGuestAccessRestrictions:
     RESTRICTED_ROLE = "2af84b1e-32c8-42b7-82bc-daa82404023b"
 
-    def _setup(self, graph_client: MagicMock, role_id: str) -> None:
-        graph_client.policies.authorization_policy.get = AsyncMock(
-            return_value=SimpleNamespace(guest_user_role_id=role_id)
-        )
+    def _setup(self, graph_router: SimpleNamespace, role_id: str) -> None:
+        graph_router.objects["authorizationPolicy"] = {"guestUserRoleId": role_id}
 
-    def test_restricted_role_produces_positive_evidence(self, graph_client: MagicMock):
-        self._setup(graph_client, self.RESTRICTED_ROLE)
+    def test_restricted_role_produces_positive_evidence(self, graph_router: SimpleNamespace):
+        self._setup(graph_router, self.RESTRICTED_ROLE)
 
         result = asyncio.run(CheckGuestAccessRestrictions().execute(FakeAzureSession()))
 
         assert len(_compliant(result)) == 1
         assert not _maengel(result)
 
-    def test_permissive_role_produces_finding(self, graph_client: MagicMock):
-        self._setup(graph_client, CheckGuestAccessRestrictions.PERMISSIVE_GUEST_ROLE)
+    def test_permissive_role_produces_finding(self, graph_router: SimpleNamespace):
+        self._setup(graph_router, CheckGuestAccessRestrictions.PERMISSIVE_GUEST_ROLE)
 
         result = asyncio.run(CheckGuestAccessRestrictions().execute(FakeAzureSession()))
 
