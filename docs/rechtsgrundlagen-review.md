@@ -312,3 +312,35 @@ Verlaufsabschnitte (Batches Nr. 4–10) und der Kampagnen-Bilanz.
 - **Gründer-Vermerk: ERTEILT (Chat-Freigabe 14.07.2026 „ok, super, setze
   gerne den Vermerk", wirksam mit Erfüllung beider Auflagen).** Beide
   ADR-0018-Vermerke liegen vor — Merge frei.
+
+#### Feature-Review Findings-Exceptions — ADR-0026 (2026-07-24)
+
+- Gegenstand (Branch `feature/findings-exceptions`): Neues Free-Feature
+  „Ausnahmen für Findings" — YAML-Datei mit Pflichtfeldern reason/expires,
+  Matching check_id+resource_id (optional account/region), First-Match-wins,
+  12-Monats-Warnung, Engine-Annotation (Schema 1.1.0, additiv), CLI
+  `--exceptions`, Report-Sektion „Ausnahmen" + „Abgelaufene Ausnahmen",
+  zweigleisiger Zähl-Ausweis und abgeleitete Zusatzsicht der Report-Schicht
+  (ADR-0026 inkl. Nachtrag vom 24.07.2026). Ausnahmen wirken nie auf
+  Positivnachweise/CheckError/NOT_APPLICABLE (ADR-0016).
+- **Zweitprüfung (legal-reviewer) Erstdurchgang: FAIL** — F1 blockierend:
+  Label „erfüllt (mit dokumentierten Ausnahmen)" verwendete das reservierte
+  Ordinal-Label (ADR-0008) für eine Kundenrisikoentscheidung; Bereichs-
+  Zusatzsicht ohne dokumentierte ADR-Grundlage. Auflagen F2 (Sektion-Intro
+  ohne Akteur/Rechtscharakter, interne ADR-Referenz im Kundentext), F3
+  (Extern-Hinweis ohne Konsequenz-Nennung; F3b Klartext-Pfad der
+  Ausnahmen-Datei im Extern-Export), Hinweise F4 (Warntext misst
+  Restlaufzeit) und F5 (Spaltenkopf „Abgelaufen am" semantisch schief).
+- Umsetzung: „Zusatzsicht"-Formulierungen ohne Quasi-Bewertung, beide
+  Gleise in einer Summary-Zeile; Intro nennt Einrichtung als Akteur und
+  stellt klar, dass eine Ausnahme die Bewertung durch Auditor/Aufsicht
+  nicht vorwegnimmt; Extern-Hinweis benennt Klartext-Folgen;
+  metadata.exceptions_file nur noch Dateiname und EXTERN-Reduktion von
+  config.exceptions_path in pseudonymize_result (Deep-Copy, ADR-0011);
+  ADR-0026-Nachtrag dokumentiert die Zusatzsicht samt Wortwahl-Vorgabe.
+- **Nachprüfung (legal-reviewer): PASS** — alle Auflagen erfüllt, keine
+  Restbefunde; Texte innerhalb Teilaspekt-Grenze (ADR-0009), keine
+  Rechtsfolgen-Aussagen (ADR-0012), Fail-safe gewahrt (ADR-0016).
+  Qualitätsgates: 513 Unit-Tests grün, ruff/format/mypy strict sauber
+  (durch Orchestrator unabhängig verifiziert).
+- **Gründer-Vermerk: AUSSTEHEND** — ohne beide Vermerke kein Merge.
