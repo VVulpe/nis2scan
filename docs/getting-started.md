@@ -58,7 +58,7 @@ pip install nis2scan
 ### From source (development)
 
 ```bash
-git clone https://github.com/VVulpe/nis2scan.git
+git clone https://github.com/letaible/nis2scan.git
 cd nis2scan
 pip install -e ".[dev]"
 ```

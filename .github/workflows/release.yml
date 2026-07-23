@@ -3,7 +3,7 @@
 # Publishing via OIDC.
 #
 # One-time setup on pypi.org (project "nis2scan" -> Publishing):
-#   owner: VVulpe, repo: nis2scan, workflow: release.yml, environment: pypi
+#   owner: letaible, repo: nis2scan, workflow: release.yml, environment: pypi
 #
 # Version coupling (ADR-0019): a new MINOR release of nis2scan requires a
 # matching nis2scan-premium release whose NIS2SCAN_REQUIRES covers it —

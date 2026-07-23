@@ -12,7 +12,7 @@
 #   cd infra/azure/oidc
 #   terraform init
 #   terraform apply \
-#     -var="github_repo=VVulpe/nis2scan" \
+#     -var="github_repo=letaible/nis2scan" \
 #     -var="subscription_id=YOUR_SUBSCRIPTION_ID"
 # ============================================================================
 
@@ -49,7 +49,7 @@ variable "subscription_id" {
 variable "github_repo" {
   description = "GitHub repository (owner/repo format)"
   type        = string
-  default     = "VVulpe/nis2scan"
+  default     = "letaible/nis2scan"
 }
 
 # --------------------------------------------------------------------------

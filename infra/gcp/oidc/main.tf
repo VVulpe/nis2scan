@@ -27,7 +27,7 @@ variable "project_id" {
 variable "github_repo" {
   description = "GitHub repository (owner/repo)"
   type        = string
-  default     = "VVulpe/nis2scan"
+  default     = "letaible/nis2scan"
 }
 
 variable "region" {
@@ -59,7 +59,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.repository" = "assertion.repository"
   }
 
-  attribute_condition = "assertion.repository=='VVulpe/nis2scan'"
+  attribute_condition = "assertion.repository=='${var.github_repo}'"
 }
 
 # ---------- Service Account ----------

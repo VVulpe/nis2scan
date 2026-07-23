@@ -82,10 +82,10 @@ dev = [
 nis2scan = "nis2scan.cli.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/VVulpe/nis2scan"
-Repository = "https://github.com/VVulpe/nis2scan"
-Issues = "https://github.com/VVulpe/nis2scan/issues"
-Documentation = "https://github.com/VVulpe/nis2scan/tree/main/docs"
+Homepage = "https://github.com/letaible/nis2scan"
+Repository = "https://github.com/letaible/nis2scan"
+Issues = "https://github.com/letaible/nis2scan/issues"
+Documentation = "https://github.com/letaible/nis2scan/tree/main/docs"
 
 [tool.hatch.version]
 # Single source of truth for the package version — bump ONLY here;

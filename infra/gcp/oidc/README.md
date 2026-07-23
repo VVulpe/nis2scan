@@ -3,7 +3,7 @@
 ## Prerequisites
 - GCP project with billing enabled
 - `gcloud` CLI authenticated with Owner role
-- GitHub repository: VVulpe/nis2scan
+- GitHub repository: letaible/nis2scan
 
 ## Setup
 

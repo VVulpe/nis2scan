@@ -4,7 +4,7 @@
 
 **Automated §30 BSIG compliance scanning for AWS, Azure & GCP**
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/VVulpe/nis2scan/blob/main/LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/letaible/nis2scan/blob/main/LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
 nis2scan automatically scans your cloud environment (AWS, Azure, GCP) against the 10 core measures of §30 Abs. 2 BSIG (part of the NIS2UmsuCG). Every finding is mapped directly to the legal text and ISO 27001:2022, making it audit-ready.
@@ -24,11 +24,11 @@ nis2scan scan --provider azure
 nis2scan scan --provider gcp
 ```
 
-**Detailed guide:** [docs/getting-started.md](https://github.com/VVulpe/nis2scan/blob/main/docs/getting-started.md): installation, cloud setup (AWS/Azure/GCP), configuration, CLI reference, troubleshooting.
+**Detailed guide:** [docs/getting-started.md](https://github.com/letaible/nis2scan/blob/main/docs/getting-started.md): installation, cloud setup (AWS/Azure/GCP), configuration, CLI reference, troubleshooting.
 
 > **Windows:** Please install into a venv (short path; Python 3.12+).
 > For details and troubleshooting, see
-> [Getting Started → Installation](https://github.com/VVulpe/nis2scan/blob/main/docs/getting-started.md#installation).
+> [Getting Started → Installation](https://github.com/letaible/nis2scan/blob/main/docs/getting-started.md#installation).
 
 ---
 
@@ -363,7 +363,7 @@ nis2scan reports serve as **automated evidence at level 4**. The scanner does no
 - **§38 management training:** The management training must actually take place (a personal obligation)
 - **§39 KRITIS audit:** For KRITIS operators: BSI audit every 3 years; nis2scan can help prepare for it, not replace it
 
-→ **A NIS2 ISMS Starter Kit is in preparation for the level 1-3 documents: ready-made templates aligned with §30 BSIG and ISO 27001, with fill-in guidance. Interested? [Open a GitHub issue](https://github.com/VVulpe/nis2scan/issues).**
+→ **A NIS2 ISMS Starter Kit is in preparation for the level 1-3 documents: ready-made templates aligned with §30 BSIG and ISO 27001, with fill-in guidance. Interested? [Open a GitHub issue](https://github.com/letaible/nis2scan/issues).**
 
 ---
 
@@ -374,7 +374,7 @@ nis2scan reports serve as **automated evidence at level 4**. The scanner does no
 pip install nis2scan
 
 # Or from the repo
-git clone https://github.com/VVulpe/nis2scan.git
+git clone https://github.com/letaible/nis2scan.git
 cd nis2scan
 pip install -e .
 ```
@@ -402,7 +402,7 @@ scan:
 ## Required permissions
 
 Detailed documentation of all required permissions:
-**[docs/permissions.md](https://github.com/VVulpe/nis2scan/blob/main/docs/permissions.md)**: AWS IAM policies, Azure RBAC + Graph API, service principal setup, OIDC CI/CD setup.
+**[docs/permissions.md](https://github.com/letaible/nis2scan/blob/main/docs/permissions.md)**: AWS IAM policies, Azure RBAC + Graph API, service principal setup, OIDC CI/CD setup.
 
 ```bash
 # Automatically generate a minimal IAM policy
@@ -432,11 +432,11 @@ Contributions welcome! Especially looking for:
 
 ## License
 
-Apache License 2.0, see [LICENSE](https://github.com/VVulpe/nis2scan/blob/main/LICENSE).
+Apache License 2.0, see [LICENSE](https://github.com/letaible/nis2scan/blob/main/LICENSE).
 This repository contains the complete free scanner (all checks, all
 providers). Premium features (PDF export, remediation-as-code, continuous
 monitoring, SaaS dashboard) are proprietary extensions in separate
-repositories and require a license. Inquiries: [GitHub Issues](https://github.com/VVulpe/nis2scan/issues).
+repositories and require a license. Inquiries: [GitHub Issues](https://github.com/letaible/nis2scan/issues).
 
 ---
 

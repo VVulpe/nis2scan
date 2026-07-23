@@ -14,7 +14,7 @@ cd infra/aws/oidc
 terraform init
 terraform apply \
   -var="aws_account_id=YOUR_ACCOUNT_ID" \
-  -var="github_repo=VVulpe/nis2scan"
+  -var="github_repo=letaible/nis2scan"
 ```
 
 ## Output
