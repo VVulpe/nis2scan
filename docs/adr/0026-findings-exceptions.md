@@ -47,3 +47,27 @@ jede Ausnahme selbst nachweisfähig sein (wer, warum, bis wann).
   PDF und SaaS dieselbe Ausnahme-Sicht haben.
 - SaaS/Premium können später Komfort darauf bauen (UI-Verwaltung,
   Ablauf-Erinnerungen) — der Mechanismus selbst bleibt frei.
+
+## Nachtrag (2026-07-24): Zusatzsicht der Report-Schicht
+
+Ergänzung zu Entscheidung 4, damit ein dokumentiert ausgenommener False
+Positive den ausgewiesenen Stand nicht dauerhaft drückt:
+
+- Der Report zeigt zusätzlich eine rein ABGELEITETE **Zusatzsicht** auf
+  Bereichsebene. Ein §30-Bereich erscheint darin nur dann als „alle Mängel
+  per dokumentierter Ausnahme akzeptiert", wenn (a) sein striktes Ergebnis
+  NICHT_ERFUELLT oder TEILWEISE_ERFUELLT ist, (b) sämtliche Mangel-Findings
+  des Bereichs eine aktive (nicht abgelaufene) Ausnahme tragen und (c) kein
+  Check des Bereichs einen Fehler produziert hat. NICHT_BEWERTBAR wird nie
+  aufgewertet (ADR-0016).
+- Die Zusatzsicht existiert AUSSCHLIESSLICH in der Report-Darstellung
+  (Markdown/PDF), nicht im JSON-Vertrag; alle strikten Werte
+  (Erfüllungsgrad, failed_checks, Outcomes) bleiben unverändert gültig
+  und sichtbar.
+- Wortwahl-Vorgabe (Befund F1 der Zweitprüfung vom 24.07.2026): Die
+  Zusatzsicht verwendet NICHT das reservierte Ordinal-Label „erfüllt"
+  (ADR-0008) als Quasi-Bewertung. Sie wird als „Zusatzsicht" mit
+  ausgeschriebener Bedingung formuliert und stellt klar, dass eine
+  Ausnahme eine Risikoentscheidung der Einrichtung ist, den Mangel nicht
+  beseitigt und eine Bewertung durch Auditor oder Aufsicht nicht
+  vorwegnimmt.

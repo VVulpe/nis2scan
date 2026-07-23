@@ -10,12 +10,14 @@ import platform
 import time
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import structlog
 
 from nis2scan import __version__
 from nis2scan.engine.events import EventBus, ScanEvent
+from nis2scan.engine.finding_exceptions import ExceptionApplication, apply_exceptions, load_exceptions_file
 from nis2scan.engine.mapping.bsig_30 import BSIG_30_BY_NR, MAPPING_VERSION, RECHTSSTAND
 from nis2scan.engine.models.check import (
     BaseCheck,
@@ -148,16 +150,35 @@ async def run_scan(
                     },
                 )
 
+    scan_timestamp = datetime.now(UTC)
+
+    # Findings-Exceptions (ADR-0026): engine-side annotation (not report-only)
+    # so JSON, Markdown, PDF and SaaS all share the same exception view. Opt-in
+    # only — no exceptions_path means no exceptions are ever applied.
+    exceptions_result: ExceptionApplication | None = None
+    if config.exceptions_path:
+        # Fail-safe: a broken exceptions file raises ExceptionsFileError here,
+        # which aborts the scan instead of silently proceeding without it
+        # (module docstring, nis2scan.engine.finding_exceptions).
+        exceptions_file = load_exceptions_file(Path(config.exceptions_path))
+        exceptions_result = apply_exceptions(all_findings, exceptions_file, scan_date=scan_timestamp.date())
+        logger.info(
+            "scan.exceptions_applied",
+            exceptions_file=config.exceptions_path,
+            applied=exceptions_result.applied_count,
+            expired=len(exceptions_result.expired_matches),
+        )
+
     duration = time.monotonic() - start_time
     summary = build_summary(all_findings, config.bsig_30_scope, outcome_entries)
-    metadata = build_metadata(duration)
+    metadata = build_metadata(duration, config.exceptions_path, exceptions_result)
 
     scan_result = ScanResult(
         schema_version=SCHEMA_VERSION,
         mapping_version=MAPPING_VERSION,
         rechtsstand=RECHTSSTAND,
         scan_id=scan_id,
-        scan_timestamp=datetime.now(UTC),
+        scan_timestamp=scan_timestamp,
         config=config,
         summary=summary,
         findings=all_findings,
@@ -244,6 +265,9 @@ def build_summary(
         area_severity = {s: 0 for s in Severity}
         for f in area_findings:
             area_severity[f.severity] += 1
+        # Findings-Exceptions (ADR-0026): additive second-track count, does
+        # NOT change area_severity/failed_checks above — see ComplianceScore.
+        area_exceptions_accepted = len([f for f in area_findings if f.exception is not None])
 
         area_entries = [e for e in entries if e.bsig_30_nr == nr]
         passed = len([e for e in area_entries if e.outcome == CheckOutcome.PASSED])
@@ -282,6 +306,7 @@ def build_summary(
                 # DEPRECATED (ADR-0008): kept for existing consumers until the
                 # W2 cleanup; now at least computed from real check counts.
                 score_percent=round((passed / total) * 100, 1) if total else 0.0,
+                exceptions_accepted_count=area_exceptions_accepted,
             )
         )
 
@@ -329,17 +354,38 @@ def build_summary(
         info_count=severity_counts[Severity.INFO],
         areas_scanned=len(scope),
         scores_by_area=scores,
+        # Findings-Exceptions (ADR-0026): sum of the per-area counts above —
+        # additive second-track disclosure, total_findings is unchanged.
+        exceptions_accepted_count=sum(s.exceptions_accepted_count for s in scores),
         overall_status=status,
         overall_score_percent=overall_score,
     )
 
 
-def build_metadata(duration: float) -> ScanMetadata:
-    """Build scan metadata."""
+def build_metadata(
+    duration: float,
+    exceptions_path: str | None = None,
+    exceptions_result: ExceptionApplication | None = None,
+) -> ScanMetadata:
+    """Build scan metadata.
+
+    exceptions_path/exceptions_result surface the Findings-Exceptions state
+    (ADR-0026) in the JSON contract: which file was used, how many findings
+    it annotated, and how many matched rules had already expired.
+
+    Only the FILENAME of the exceptions file is stored (legal review
+    2026-07-24, F3b): a full local path often contains the operator's user
+    name and would leak it into every report — including the EXTERN profile.
+    The full path stays available at scan time via ScanConfig.exceptions_path
+    (reduced to the filename at EXTERN export, see reporting.pseudonymize).
+    """
     metadata = ScanMetadata(
         tool_version=__version__,
         python_version=platform.python_version(),
         scan_duration_seconds=round(duration, 2),
+        exceptions_file=Path(exceptions_path).name if exceptions_path else None,
+        exceptions_applied=exceptions_result.applied_count if exceptions_result else 0,
+        exceptions_expired=len(exceptions_result.expired_matches) if exceptions_result else 0,
     )
 
     try:

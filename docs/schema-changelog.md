@@ -3,6 +3,48 @@
 Jede Änderung an Modellen in `nis2scan/engine/models/` wird hier deklariert:
 additiv (Minor) oder breaking (Major). Ab 1.0.0 gilt SemVer strikt.
 
+## 1.1.0: 2026-07-23 (Findings-Exceptions, ADR-0026)
+
+Rein additiv — keine bestehenden Felder entfernt oder umdefiniert.
+
+**Neu:**
+- `Finding.exception` (optional, Default `null`): `FindingExceptionInfo`
+  (`reason`, `expires`, `author`, `ticket`) — gesetzt, wenn eine aktive,
+  nicht abgelaufene Regel aus einer Ausnahmen-Datei (`--exceptions`) auf
+  diesen Mangel-Befund greift. Wird ausschließlich vom Engine-seitigen
+  `apply_exceptions` (nis2scan/engine/finding_exceptions.py) gesetzt, nie von
+  Checks selbst, und niemals auf `status == compliant` (ADR-0016 Fail-Safe:
+  eine Ausnahme akzeptiert einen dokumentierten Mangel, sie erzeugt niemals
+  Konformität).
+- `Finding.expired_exception` (optional, Default `null`): gleiche Struktur —
+  gesetzt, wenn ein Befund nur noch von einer bereits abgelaufenen Regel
+  erfasst wird (Ablauf-Hinweis, ADR-0026 Entscheidung 3). Der Mangel zählt in
+  diesem Fall in allen bestehenden Zählungen ganz normal als offen mit.
+- `ScanConfig.exceptions_path` (optional, Default `null`): Pfad zur
+  Ausnahmen-Datei; ohne Angabe werden nie Ausnahmen angewendet (kein
+  impliziter Default). Beim EXTERN-Export wird der Wert auf den bloßen
+  Dateinamen reduziert (Rechts-Review F3b, 2026-07-24: lokale Pfade
+  enthalten oft Benutzernamen und verlassen die Organisation nicht).
+- `ScanMetadata.exceptions_file`, `.exceptions_applied`, `.exceptions_expired`
+  (optional/Default `null`/`0`/`0`): Ausführungs-Metadaten des Scans —
+  welche Datei verwendet wurde, wie viele Befunde annotiert wurden, und wie
+  viele gematchte Regeln bereits abgelaufen waren. `exceptions_file` enthält
+  von vornherein NUR den Dateinamen ohne Pfad (build_metadata; Rechts-Review
+  F3b, 2026-07-24) — in beiden Profilen, damit der lokale Klartext-Pfad
+  auch nicht im internen JSON der Metadaten landet.
+- `ComplianceScore.exceptions_accepted_count`,
+  `ComplianceSummary.exceptions_accepted_count` (Default `0`): zweigleisige,
+  rein additive Zusatzauskunft pro §30-Bereich und gesamt — "davon N per
+  dokumentierter Ausnahme akzeptiert". Die bestehenden Zählungen
+  (`total_findings`, `failed_checks`, `critical_count` usw., sowie
+  `erfuellungsgrad`/`erfuellungsgrad_gesamt`) sind NICHT umdefiniert: sie
+  zählen Ausnahme-Befunde weiterhin voll als Mängel mit (keine stille
+  Herausrechnung, ADR-0026 Entscheidung 4). Eine "effektive" Anzeige
+  ("erfüllt (mit dokumentierten Ausnahmen)") existiert AUSSCHLIESSLICH als
+  abgeleitete Darstellung in der Report-Schicht
+  (`nis2scan/reporting/context.py`, Gründer-Entscheid Runde 2) — sie ist
+  bewusst NICHT Teil des JSON-Vertrags und kein Feld dieses Schemas.
+
 ## 1.0.0: 2026-07-13 (FREEZE, Release 0.1)
 
 Dedizierte Schema-Review-Session (ADR-0021) gegen die Phase-2-Bedürfnisse

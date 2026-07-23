@@ -1,6 +1,6 @@
 """Finding model — the core data unit of every scan."""
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -34,6 +34,22 @@ class FindingStatus(StrEnum):
 
     COMPLIANT = "compliant"
     NON_COMPLIANT = "non_compliant"
+
+
+class FindingExceptionInfo(BaseModel):
+    """Documented, time-boxed exception applied to a non-compliant finding (ADR-0026).
+
+    Set by the engine (nis2scan.engine.finding_exceptions.apply_exceptions)
+    when a matching, non-expired rule from a customer-owned exceptions file
+    applies — never set by checks themselves, and never on a COMPLIANT
+    finding (an exception can only accept a documented defect, it can never
+    manufacture compliance, ADR-0016 fail-safe).
+    """
+
+    reason: str = Field(description="Documented rationale for accepting this finding, in German")
+    expires: date = Field(description="Due date of the exception (UTC calendar date)")
+    author: str | None = Field(default=None, description="Person who documented the exception")
+    ticket: str | None = Field(default=None, description="Reference to a ticket/ticket system, if any")
 
 
 class Finding(BaseModel):
@@ -75,6 +91,19 @@ class Finding(BaseModel):
     remediation: str = Field(description="Recommended remediation action, in German")
     remediation_effort: str = Field(description="Estimated effort: LOW / MEDIUM / HIGH")
     audit_evidence: str = Field(default="", description="Machine-readable audit evidence")
+
+    # Documented exception (ADR-0026): additive, optional, applied only to
+    # NON_COMPLIANT findings by the engine — see FindingExceptionInfo.
+    exception: FindingExceptionInfo | None = Field(
+        default=None, description="Documented, time-boxed exception accepting this defect, if any"
+    )
+    # Ablauf-Hinweis (ADR-0026 decision 3): set instead of `exception` when
+    # this finding was matched ONLY by an already-expired rule — the defect
+    # counts again in full (never suppressed), but the report can still name
+    # the exception that used to apply and when it lapsed.
+    expired_exception: FindingExceptionInfo | None = Field(
+        default=None, description="A previously matching exception that has since expired, if any"
+    )
 
     # Metadata
     timestamp: datetime = Field(default_factory=datetime.utcnow)

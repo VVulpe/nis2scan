@@ -19,12 +19,32 @@ finding, so identifiers embedded in German descriptions are scrubbed too.
 Pseudonyms are keyed with NIS2SCAN_SECRET (HMAC-SHA256, consistent with
 finding_key per ADR-0010); without the secret an unkeyed SHA-256 fallback
 offers no dictionary-attack protection.
+
+KNOWN LIMITATION (ADR-0026, Findings-Exceptions): `Finding.exception` and
+`Finding.expired_exception` are intentionally NOT scrubbed. `reason`,
+`author` and `ticket` are a customer's own documented, auditable rationale —
+rewriting that text would undermine the audit trail the exception mechanism
+exists to provide. `expires` is a bare date, never identifying. In practice
+this means: if a customer writes a raw resource name, account ID or person's
+name into an exception's `reason` (or `author`/`ticket`) field, that text
+will appear verbatim even in an EXTERN (pseudonymized) report — customers
+who plan to share reports externally should avoid embedding raw identifiers
+in exception documentation. The EXTERN report states this limitation in a
+visible hint inside the "Ausnahmen" section (legal review 2026-07-24, F3).
+
+Exceptions-file PATH (legal review 2026-07-24, F3b): a full local path often
+contains the operator's OS user name. ScanMetadata.exceptions_file therefore
+carries only the filename from the start (build_metadata); the full path in
+ScanConfig.exceptions_path — needed at scan time to locate the file — is
+additionally reduced to its filename here on EXTERN export, so no local
+path ever leaves the organization via the EXTERN JSON.
 """
 
 import hashlib
 import hmac
 import re
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from nis2scan.engine.models.finding import Finding
@@ -99,6 +119,14 @@ def pseudonymize_result(result: ScanResult) -> ScanResult:
     secret = resolve_secret()
 
     pseudonymized = result.model_copy(deep=True)
+
+    # F3b (legal review 2026-07-24): the configured exceptions-file path may
+    # contain the operator's local user name — reduce it to the bare filename
+    # before the result leaves the organization. Metadata already stores only
+    # the filename (build_metadata); this covers the config copy in the JSON.
+    if pseudonymized.config.exceptions_path:
+        pseudonymized.config.exceptions_path = Path(pseudonymized.config.exceptions_path).name
+
     for finding in pseudonymized.findings:
         identifiers = sorted(_collect_identifiers(finding), key=len, reverse=True)
         mapping = [(raw, _pseudonym(raw, secret)) for raw in identifiers]
