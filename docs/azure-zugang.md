@@ -11,7 +11,7 @@ unbeaufsichtigte Azure-Scans gilt das etablierte SaaS-Muster: eine
   Scanner-Betreiber (Env: `NIS2SCAN_AZURE_CLIENT_ID` / `NIS2SCAN_AZURE_CLIENT_SECRET`)
   und liegt nie beim Kunden.
 - **Kunde speichert nichts Geheimes bei uns:** Wir merken uns nur seine
-  **Tenant-ID** und die **Subscription-IDs** — keine Credentials.
+  **Tenant-ID** und die **Subscription-IDs**, keine Credentials.
 - **Widerrufbar:** Der Kunde entzieht den Zugang jederzeit, indem er die
   App/Enterprise-Application in seinem Entra ID entfernt.
 
@@ -25,7 +25,7 @@ unbeaufsichtigte Azure-Scans gilt das etablierte SaaS-Muster: eine
    `NIS2SCAN_AZURE_CLIENT_ID` / `NIS2SCAN_AZURE_CLIENT_SECRET` beim SaaS-Worker
    (bzw. für die CLI in der Umgebung) hinterlegen.
 3. Die benötigten Rollen-/Graph-Berechtigungen dokumentieren
-   (`nis2scan permissions --provider azure` — ARM-Rolle „Reader" plus die
+   (`nis2scan permissions --provider azure`: ARM-Rolle „Reader" plus die
    separat via App-Registrierung zu erteilenden Microsoft-Graph-Application-
    Permissions; siehe ADR-0020: Graph ist **nicht** per RBAC vergebbar).
 
@@ -49,13 +49,13 @@ unbeaufsichtigte Azure-Scans gilt das etablierte SaaS-Muster: eine
   (`ClientSecretCredential(tenant_id=<Kunde>, client_id=<App>, secret=<App>)`)
   und scannt die hinterlegten Subscriptions.
 - CLI (Betreiber-seitig, unbeaufsichtigt): App-Credentials als Env-Variablen
-  setzen, dann implizit über `DefaultAzureCredential` **oder** — für den
-  Cross-Tenant-Fall — die SaaS-Wiring-Felder nutzen. Für interaktive Einzelscans
+  setzen, dann implizit über `DefaultAzureCredential` **oder** (für den
+  Cross-Tenant-Fall) die SaaS-Wiring-Felder nutzen. Für interaktive Einzelscans
   genügt `az login` (DefaultAzureCredential greift automatisch).
 
 ## Grenzen (ehrlich)
 
 - **GCP** nutzt weiterhin Application Default Credentials / Workload Identity
   Federation; ein per-Tenant-GCP-Zugang analog zu AWS/Azure ist noch offen.
-- Graph-Berechtigungen sind mächtig — Least Privilege einhalten und nur die
+- Graph-Berechtigungen sind mächtig: Least Privilege einhalten und nur die
   von den Checks tatsächlich benötigten Application-Permissions freigeben.

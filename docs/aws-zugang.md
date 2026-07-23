@@ -1,7 +1,7 @@
 # AWS-Zugang für nis2scan
 
 nis2scan ist **read-only** und speichert selbst keine Credentials. Es gibt zwei
-Zugangswege — je nach Betriebsart.
+Zugangswege, je nach Betriebsart.
 
 ## Überblick
 
@@ -67,7 +67,7 @@ Conditional-Access-/MFA-Policies); der Scan läuft mit temporären Credentials.
 
 Der Scanner (oder der SaaS-Worker) nimmt in jedem Zielkonto eine Read-Only-Rolle
 per `sts:AssumeRole` an. In der Vertrauensrichtlinie steht eine **ExternalId**
-(gemeinsames Geheimnis) als Confused-Deputy-Schutz — es werden **keine
+(gemeinsames Geheimnis) als Confused-Deputy-Schutz; es werden **keine
 dauerhaften Zugangsschlüssel** hinterlegt.
 
 Terraform für das Zielkonto: siehe [infra/aws/roles/nis2scan-cross-account.tf](../infra/aws/roles/nis2scan-cross-account.tf).
@@ -85,12 +85,12 @@ nis2scan scan --provider aws \
 (`POST /api/v1/cloud-accounts`, Provider `aws`). Die ExternalId wird
 serverseitig gespeichert und **nie über die API zurückgegeben**; der Worker
 nimmt beim Scan die Rolle an. Beim Anlegen eines Scans wird die
-`cloud_account_id` referenziert — die Ableitung erfolgt genau wie oben.
+`cloud_account_id` referenziert; die Ableitung erfolgt genau wie oben.
 
 ### Sicherheitsgrundsätze
 
 - Immer eine **eigene ExternalId je Tenant/Kunde** (nicht wiederverwenden).
 - Die Rolle ist strikt read-only (Policy aus dem Generator); kein `iam:*`,
   kein Schreibrecht.
-- Rollen-ARN und ExternalId sind **keine** Credentials — ohne die
+- Rollen-ARN und ExternalId sind **keine** Credentials: ohne die
   vertrauenswürdige Principal-Identität des Scanners nutzlos.

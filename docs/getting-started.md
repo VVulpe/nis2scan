@@ -24,7 +24,7 @@ Azure, or GCP environment.
 
 - **Python 3.12 or later** (3.13 also supported)
 - **Cloud credentials** for at least one provider (AWS, Azure, or GCP)
-- **Read-only access** — nis2scan never modifies your cloud resources
+- **Read-only access**: nis2scan never modifies your cloud resources
 
 ### Verify Python version
 
@@ -39,7 +39,7 @@ python3 --version   # Must be 3.12+
 ### From PyPI (recommended)
 
 Requires Python 3.12+. Install into a virtual environment (best practice, and
-on Windows it also keeps installation paths short — see the note below):
+on Windows it also keeps installation paths short; see the note below):
 
 ```bash
 python -m venv .venv
@@ -76,7 +76,7 @@ nis2scan --version
 
 ### Quick start (CLI only)
 
-No config file needed — use CLI flags:
+No config file needed, just use CLI flags:
 
 ```bash
 nis2scan scan --provider aws --region eu-central-1
@@ -174,7 +174,7 @@ export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=eu-central-1
 
 # Option 3: IAM role (if running on EC2/ECS/Lambda)
-# No setup needed — uses instance metadata automatically
+# No setup needed, uses instance metadata automatically
 ```
 
 ### Step 3: Run the scan
@@ -223,7 +223,7 @@ az ad sp create-for-rbac \
   --scopes "/subscriptions/YOUR_SUBSCRIPTION_ID"
 ```
 
-Save the output — you'll need `appId`, `password`, and `tenant`.
+Save the output; you'll need `appId`, `password`, and `tenant`.
 
 ### Step 2: Grant Graph API permissions (for identity checks)
 
@@ -247,10 +247,10 @@ az ad app permission admin-consent --id $APP_ID
 ```
 
 These permissions are:
-- `User.Read.All` — Guest user and stale user checks
-- `Policy.Read.All` — Conditional Access and MFA checks
-- `RoleManagement.Read.Directory` — PIM checks
-- `Application.Read.All` — Service principal audit
+- `User.Read.All`: Guest user and stale user checks
+- `Policy.Read.All`: Conditional Access and MFA checks
+- `RoleManagement.Read.Directory`: PIM checks
+- `Application.Read.All`: Service principal audit
 
 ### Step 3: Configure credentials
 
@@ -262,10 +262,10 @@ export AZURE_TENANT_ID="your-tenant-id"
 
 # Option 2: Azure CLI (simplest for local scans)
 az login
-# nis2scan uses DefaultAzureCredential — picks up az login automatically
+# nis2scan uses DefaultAzureCredential and picks up az login automatically
 
 # Option 3: Managed Identity (on Azure VMs/App Service)
-# No setup needed — uses managed identity automatically
+# No setup needed, uses managed identity automatically
 ```
 
 ### Step 4: Run the scan
@@ -426,7 +426,7 @@ nis2scan permissions --provider azure --format json
 
 | Code | Meaning |
 |------|---------|
-| 0 | Compliant — no findings or only LOW/INFO |
+| 0 | Compliant, no findings or only LOW/INFO |
 | 1 | High severity findings found |
 | 2 | Critical severity findings found |
 
@@ -479,7 +479,7 @@ Each finding includes:
 Pseudonymization is an **export decision** (report profile), not a scan
 setting. By default reports use the `intern` profile with full identifiers so
 your team can locate and fix issues. When a report is shared externally
-(auditors, authorities), export it with the `extern` profile — identifying
+(auditors, authorities), export it with the `extern` profile, where identifying
 values (resource IDs, account IDs, usernames embedded in descriptions and
 evidence) are replaced by keyed pseudonyms:
 
@@ -524,7 +524,7 @@ Show required cloud permissions.
 `nis2scan remediate`, `nis2scan monitor`, and the `nis2scan license` subcommands
 are part of the proprietary `nis2scan-premium` plugin (Professional tier) and
 appear automatically once the plugin is installed. This repository contains no
-premium code — only the entry-point plugin loader (`nis2scan.plugins`).
+premium code, only the entry-point plugin loader (`nis2scan.plugins`).
 
 ---
 
@@ -532,7 +532,7 @@ premium code — only the entry-point plugin loader (`nis2scan.plugins`).
 
 ### `pip install` says "No matching distribution found for nis2scan"
 
-Your default Python is older than 3.12 (check with `python --version`) — pip
+Your default Python is older than 3.12 (check with `python --version`). Pip
 then hides all nis2scan versions because of their `Requires-Python >=3.12`
 marker. Install with a modern interpreter, e.g. on Windows:
 
@@ -542,7 +542,7 @@ py -3.13 -m pip install nis2scan
 
 ### `pip install` fails on Windows with `OSError: [Errno 2] No such file or directory: ...site-packages\...`
 
-An installation path exceeded the classic 260-character Windows limit —
+An installation path exceeded the classic 260-character Windows limit. This is
 typical for `pip install --user` with the Microsoft Store Python. Install
 into a venv in a short directory instead (see
 [Installation](#installation)), enable Windows long-path support
@@ -572,7 +572,7 @@ Generate the exact permission list:
 nis2scan permissions --provider aws --format list
 ```
 
-The scan continues even if individual checks fail due to missing permissions —
+The scan continues even if individual checks fail due to missing permissions;
 failed checks appear as errors in the report, not as findings.
 
 ### "Provider not enabled"
@@ -601,7 +601,7 @@ Focus on:
 
 - Reduce scope: `--scope 1 --scope 2` (only scan specific areas)
 - Reduce regions: `--region eu-central-1` (instead of all regions)
-- Some APIs are slow (AWS Organizations, Azure Graph) — this is normal
+- Some APIs are slow (AWS Organizations, Azure Graph); this is normal
 
 ### PDF export not working
 
@@ -618,9 +618,9 @@ nis2scan scan --provider aws --format pdf
 ## Next Steps
 
 1. **Run your first scan** and review the report
-2. **Fix critical findings** — these represent immediate legal compliance risk
-3. **Create ISMS documentation** — nis2scan provides Level 4 evidence, but you
+2. **Fix critical findings**: these represent immediate legal compliance risk
+3. **Create ISMS documentation**: nis2scan provides Level 4 evidence, but you
    need Level 1-3 policies (see [nis2scan.de/templates](https://nis2scan.de/templates))
-4. **Set up CI/CD** — run scans automatically on every deployment
+4. **Set up CI/CD**: run scans automatically on every deployment
    (see [docs/permissions.md](permissions.md) for OIDC setup)
-5. **Schedule regular scans** — NIS2 requires ongoing compliance, not one-time
+5. **Schedule regular scans**: NIS2 requires ongoing compliance, not one-time

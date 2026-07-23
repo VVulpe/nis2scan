@@ -153,9 +153,9 @@ az ad app federated-credential create --id $APP_ID --parameters '{
 ```
 
 Store these as GitHub secrets:
-- `AZURE_CLIENT_ID` — Application (client) ID
-- `AZURE_TENANT_ID` — Directory (tenant) ID
-- `AZURE_SUBSCRIPTION_ID` — Target subscription ID
+- `AZURE_CLIENT_ID`: Application (client) ID
+- `AZURE_TENANT_ID`: Directory (tenant) ID
+- `AZURE_SUBSCRIPTION_ID`: Target subscription ID
 
 ---
 
@@ -254,6 +254,6 @@ terraform apply -var="project_id=PROJECT_ID"
 ```
 
 Store these as GitHub secrets:
-- `GCP_PROJECT_ID` — GCP project ID
-- `GCP_WORKLOAD_IDENTITY_PROVIDER` — Full WIF provider name
-- `GCP_SERVICE_ACCOUNT` — Service account email
+- `GCP_PROJECT_ID`: GCP project ID
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`: Full WIF provider name
+- `GCP_SERVICE_ACCOUNT`: Service account email
