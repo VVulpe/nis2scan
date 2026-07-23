@@ -45,6 +45,15 @@ variable "github_repo" {
   default     = "letaible/nis2scan"
 }
 
+# GitHub issues ID-hardened OIDC subjects (owner@id/repo@id) for this repo
+# since its transfer into the letaible org — the sub claim carries immutable
+# numeric IDs to prevent name-reuse attacks. Both formats are trusted.
+variable "github_repo_with_ids" {
+  description = "GitHub repository in ID-hardened OIDC subject format (owner@id/repo@id)"
+  type        = string
+  default     = "letaible@308314955/nis2scan@1300122537"
+}
+
 # --------------------------------------------------------------------------
 # OIDC Provider for GitHub Actions
 # --------------------------------------------------------------------------
@@ -81,7 +90,10 @@ data "aws_iam_policy_document" "ci_trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:*"]
+      values = [
+        "repo:${var.github_repo}:*",
+        "repo:${var.github_repo_with_ids}:*",
+      ]
     }
 
     condition {

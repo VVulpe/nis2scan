@@ -52,6 +52,15 @@ variable "github_repo" {
   default     = "letaible/nis2scan"
 }
 
+# GitHub issues ID-hardened OIDC subjects (owner@id/repo@id) for this repo
+# since its transfer into the letaible org. Entra federated credentials match
+# subjects exactly, so both formats get their own credential set.
+variable "github_repo_with_ids" {
+  description = "GitHub repository in ID-hardened OIDC subject format (owner@id/repo@id)"
+  type        = string
+  default     = "letaible@308314955/nis2scan@1300122537"
+}
+
 # --------------------------------------------------------------------------
 # Data Sources
 # --------------------------------------------------------------------------
@@ -127,6 +136,33 @@ resource "azuread_application_federated_identity_credential" "github_env" {
   audiences      = ["api://AzureADTokenExchange"]
   issuer         = "https://token.actions.githubusercontent.com"
   subject        = "repo:${var.github_repo}:environment:integration-test-azure"
+}
+
+resource "azuread_application_federated_identity_credential" "github_main_ids" {
+  application_id = azuread_application.nis2scan_ci.id
+  display_name   = "github-actions-main-ids"
+  description    = "GitHub Actions OIDC for main branch (ID-hardened subject)"
+  audiences      = ["api://AzureADTokenExchange"]
+  issuer         = "https://token.actions.githubusercontent.com"
+  subject        = "repo:${var.github_repo_with_ids}:ref:refs/heads/main"
+}
+
+resource "azuread_application_federated_identity_credential" "github_pr_ids" {
+  application_id = azuread_application.nis2scan_ci.id
+  display_name   = "github-actions-pr-ids"
+  description    = "GitHub Actions OIDC for pull requests (ID-hardened subject)"
+  audiences      = ["api://AzureADTokenExchange"]
+  issuer         = "https://token.actions.githubusercontent.com"
+  subject        = "repo:${var.github_repo_with_ids}:pull_request"
+}
+
+resource "azuread_application_federated_identity_credential" "github_env_ids" {
+  application_id = azuread_application.nis2scan_ci.id
+  display_name   = "github-actions-env-ids"
+  description    = "GitHub Actions OIDC for integration-test-azure environment (ID-hardened subject)"
+  audiences      = ["api://AzureADTokenExchange"]
+  issuer         = "https://token.actions.githubusercontent.com"
+  subject        = "repo:${var.github_repo_with_ids}:environment:integration-test-azure"
 }
 
 # --------------------------------------------------------------------------
