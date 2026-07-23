@@ -33,6 +33,7 @@ Domänensprache: siehe [CONTEXT.md](../../CONTEXT.md).
 | [0023](0023-konsolidierte-feature-matrix.md) | Konsolidierte Feature-Matrix | Akzeptiert (Runde 6) |
 | [0024](0024-m365-provider.md) | Microsoft 365 als vierter Provider | Akzeptiert (Chat-Grilling 23.07.2026) |
 | [0025](0025-meldehilfe-p32.md) | Meldehilfe für §32 BSIG (PRO) | Akzeptiert (Chat-Grilling 23.07.2026) |
+| [0026](0026-findings-exceptions.md) | Ausnahmen für Findings (FREE) | Akzeptiert (Chat-Grilling 23.07.2026) |
 
 ## Offene Entscheidungen (Grilling-Backlog)
 
