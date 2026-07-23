@@ -1,5 +1,7 @@
 # nis2scan: NIS2 Cloud Compliance Scanner
 
+*English version: [README.en.md](README.en.md)*
+
 **Automatisierte §30 BSIG Compliance-Prüfung für AWS, Azure & GCP**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/VVulpe/nis2scan/blob/main/LICENSE)
