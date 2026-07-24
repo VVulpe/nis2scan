@@ -59,7 +59,10 @@ jobs:
         run: terraform output -json > ../../tests/integration/tf_outputs.json
 
       - name: Run Integration Tests
-        run: pytest tests/integration/test_integration_nr*.py -v --tb=short -m integration -n auto
+        # test_integration_exceptions.py is named outside the nr* pattern and
+        # must be listed explicitly — it exercises the ADR-0026 exceptions
+        # flow against a known intentional gap in the test infrastructure.
+        run: pytest tests/integration/test_integration_nr*.py tests/integration/test_integration_exceptions.py -v --tb=short -m integration -n auto
 
       # === Cleanup Phase (always runs, even on failure) ===
 
