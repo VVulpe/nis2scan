@@ -11,6 +11,7 @@ from nis2scan.engine.providers.aws.checks.nr4_lieferkette import (
     CheckOrganizationsExternalAccounts,
     CheckRamSharingPolicies,
     CheckScpForThirdPartyOus,
+    CheckTrustedAdvisorAccess,
 )
 from nis2scan.engine.providers.aws.session import AwsSession
 
@@ -26,6 +27,59 @@ def _compliant(result):
 
 def _maengel(result):
     return [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+
+
+class TestCheckTrustedAdvisorAccess:
+    @mock_aws
+    def test_full_access_produces_positive_evidence(self):
+        # moto's default DescribeTrustedAdvisorChecks returns >=20 checks (Business/Enterprise-like access).
+        session = _make_session()
+
+        result = asyncio.run(CheckTrustedAdvisorAccess().execute(session))
+
+        compliant = _compliant(result)
+        assert len(compliant) == 1
+        assert compliant[0].current_state["available_checks"] >= 20
+        assert not _maengel(result)
+
+    @mock_aws
+    def test_limited_access_produces_info_finding(self, monkeypatch):
+        session = _make_session()
+        support = session.client("support", region="us-east-1")
+        real_describe = support.describe_trusted_advisor_checks
+
+        def _limited(**kwargs):
+            resp = real_describe(**kwargs)
+            resp["checks"] = resp["checks"][:5]
+            return resp
+
+        monkeypatch.setattr(support, "describe_trusted_advisor_checks", _limited)
+        monkeypatch.setattr(session, "client", lambda service, region=None: support)
+
+        result = asyncio.run(CheckTrustedAdvisorAccess().execute(session))
+
+        maengel = _maengel(result)
+        assert len(maengel) == 1
+        assert maengel[0].severity.value == "INFO"
+        assert maengel[0].current_state["available_checks"] == 5
+        assert not _compliant(result)
+
+    @mock_aws
+    def test_api_error_produces_check_error_not_silent_pass(self, monkeypatch):
+        session = _make_session()
+        support = session.client("support", region="us-east-1")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(support, "describe_trusted_advisor_checks", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: support)
+
+        result = asyncio.run(CheckTrustedAdvisorAccess().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "AWSClientError"
 
 
 class TestCheckRamSharingPolicies:

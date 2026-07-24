@@ -15,8 +15,9 @@ Azure, or GCP environment.
 6. [GCP Setup](#gcp-setup)
 7. [Running a Scan](#running-a-scan)
 8. [Understanding Results](#understanding-results)
-9. [CLI Reference](#cli-reference)
-10. [Troubleshooting](#troubleshooting)
+9. [Findings Exceptions](#findings-exceptions)
+10. [CLI Reference](#cli-reference)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -424,11 +425,34 @@ nis2scan permissions --provider azure --format json
 
 ### Exit codes
 
+Semantics since v0.1.5:
+
 | Code | Meaning |
 |------|---------|
-| 0 | Compliant, no findings or only LOW/INFO |
-| 1 | High severity findings found |
-| 2 | Critical severity findings found |
+| 0 | No HIGH or CRITICAL findings (LOW/MEDIUM/INFO findings may still exist) |
+| 1 | At least one HIGH severity finding |
+| 2 | At least one CRITICAL severity finding |
+| 3 | Scan not meaningful: every applicable check ended in an error, none passed or failed |
+
+Exit code 3 only fires when there is truly nothing to report on, for example
+because credentials or permissions are broken and every check errored out. A
+check that genuinely fails (a real defect) still counts as a meaningful
+result and yields exit code 1 or 2, not 3.
+
+For CI/CD, gate on the exit code directly, for example:
+
+```bash
+nis2scan scan --provider aws --region eu-central-1
+exit_code=$?
+
+if [ "$exit_code" -ge 3 ]; then
+  echo "Scan produced no usable result, check credentials/permissions"
+  exit 1
+elif [ "$exit_code" -ge 1 ]; then
+  echo "HIGH or CRITICAL findings present"
+  exit 1
+fi
+```
 
 ### Output files
 
@@ -493,6 +517,85 @@ finding fingerprints stable across scans.
 
 ---
 
+## Findings Exceptions
+
+Every scan produces findings that an organization has consciously decided not
+to remediate right now: false positives, accepted risks, or documented
+special cases (for example an intentionally public S3 bucket that hosts a
+static website). nis2scan supports documenting such exceptions in a
+customer-owned YAML file instead of leaving you to re-triage the same finding
+on every scan.
+
+Exceptions are opt-in only: without the `--exceptions` flag, nothing is ever
+suppressed. There is no implicit default file.
+
+### Exceptions file format
+
+```bash
+nis2scan scan --provider aws --exceptions exceptions.yaml
+```
+
+Example `exceptions.yaml`:
+
+```yaml
+version: 1
+exceptions:
+  - check_id: AWS-NR9-004
+    resource_id: sg-0123456789abcdef0
+    reason: "Bewusst offener Port 443 fuer die oeffentliche Website, Risikoentscheidung vom 2026-01-10."
+    expires: 2026-12-31
+    author: "Jane Doe"
+    ticket: "JIRA-1234"
+    account_id: "111122223333"
+    region: "eu-central-1"
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `check_id` | yes | Check identifier the rule applies to, e.g. `AWS-NR9-001` |
+| `resource_id` | yes | Exact resource identifier (ARN/ID) the rule applies to |
+| `reason` | yes | Documented rationale for why the finding is accepted |
+| `expires` | yes | Due date (ISO date, `YYYY-MM-DD`) after which the exception no longer applies |
+| `author` | no | Person who documented the exception |
+| `ticket` | no | Reference to a ticket in your ticket system |
+| `account_id` | no | Narrows the match to this account/subscription/project |
+| `region` | no | Narrows the match to this cloud region |
+
+A rule matches a finding when `check_id` and `resource_id` match exactly.
+`account_id` and `region`, when set on the rule, narrow the match further; a
+rule that leaves them unset matches any account or region.
+
+### Behavior
+
+- The finding stays visible. An exception is not a delete button: the finding
+  still appears in the report, now carrying its exception's reason, due date,
+  and (if given) author in a dedicated "Ausnahmen" (exceptions) report
+  section.
+- Compliance counts are never silently reduced. `erfuellungsgrad`,
+  `total_findings`, `failed_checks`, and the other existing counts still
+  count an excepted finding in full as an open defect. The report separately
+  and additionally states how many findings are "per dokumentierter Ausnahme
+  akzeptiert" (accepted via a documented exception), so the strict numbers
+  and the exception view are both visible side by side, never one replacing
+  the other.
+- `expires` is mandatory; unlimited exceptions are not supported. If a rule's
+  remaining runtime from the scan date exceeds roughly 12 months, nis2scan
+  prints a warning at scan time as a review reminder, but still applies the
+  rule.
+- Once a rule's `expires` date has passed, it stops applying: the finding
+  counts as fully open again, and the report separately calls out the expired
+  exception so it does not silently drop off your radar.
+- Exceptions apply only to non-compliant findings (Mängel). They never apply
+  to positive evidence (compliant findings), check errors, or
+  not-applicable outcomes: an exception can accept a documented defect, it
+  can never manufacture compliance.
+
+Documenting an exception is a risk decision made by the organization
+operating the scan. It does not remove the underlying defect, and it does
+not preempt any assessment by an auditor or a supervisory authority.
+
+---
+
 ## CLI Reference
 
 ### `nis2scan scan`
@@ -509,6 +612,7 @@ Run a NIS2 compliance scan.
 | `--format`, `-f` | `json,markdown` | Output formats: `json`, `markdown` (+ formats from installed plugins, e.g. `pdf`) |
 | `--output`, `-o` | `./reports` | Output directory |
 | `--report-profile` | `intern` | Export profile: `intern` (raw identifiers) or `extern` (pseudonymized) |
+| `--exceptions` | None | Path to a Findings Exceptions YAML file (see [Findings Exceptions](#findings-exceptions)) |
 
 ### `nis2scan permissions`
 

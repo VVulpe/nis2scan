@@ -87,6 +87,42 @@ class TestCheckCrossProjectBindings:
         assert len(_compliant(result)) == 1
         assert not _maengel(result)
 
+    def test_external_member_evidence_key_is_pseudonymized_on_extern_export(self):
+        # CODE-1 (ADR-0011 deny-list): the raw external member — a service
+        # account e-mail — must live under a current_state key ending in
+        # _name/_id/_arn/_email, or the EXTERN report profile leaks it verbatim.
+        member = "serviceAccount:vendor@other-project.iam.gserviceaccount.com"
+        session = self._session_with_member(member)
+
+        result = asyncio.run(CheckCrossProjectBindings().execute(session))
+        finding = _maengel(result)[0]
+
+        assert finding.current_state["external_member_email"] == [member]
+        assert "external_members_sample" not in finding.current_state
+
+        from nis2scan.engine.models.config import ScanConfig
+        from nis2scan.engine.models.result import ScanResult
+        from nis2scan.reporting.pseudonymize import pseudonymize_result
+
+        scan_result = ScanResult(scan_id="test", config=ScanConfig(), findings=[finding])
+        pseudonymized = pseudonymize_result(scan_result).findings[0]
+
+        pseudonymized_members = pseudonymized.current_state["external_member_email"]
+        assert pseudonymized_members != [member]
+        assert all(m.startswith("pseu_") for m in pseudonymized_members)
+        assert "vendor@other-project" not in str(pseudonymized.current_state)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session(external=False)
+        service = session.service("cloudresourcemanager", "v1")
+        service.projects.return_value.getIamPolicy.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckCrossProjectBindings().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckServiceAccountKeys:
     def _session(self, user_keys: int) -> FakeGcpSession:
@@ -114,6 +150,19 @@ class TestCheckServiceAccountKeys:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session(user_keys=0)
+        service = session.service("iam", "v1")
+        service.projects.return_value.serviceAccounts.return_value.list.return_value.execute.side_effect = RuntimeError(
+            "boom"
+        )
+
+        result = asyncio.run(CheckServiceAccountKeys().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckWorkloadIdentity:
@@ -148,6 +197,15 @@ class TestCheckWorkloadIdentity:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self, gke_client: MagicMock):
+        gke_client.list_clusters.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckWorkloadIdentity().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckBinaryAuthorization:
     def _session(self, mode: str) -> FakeGcpSession:
@@ -168,6 +226,17 @@ class TestCheckBinaryAuthorization:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session("ALWAYS_ALLOW")
+        service = session.service("binaryauthorization", "v1")
+        service.projects.return_value.getPolicy.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckBinaryAuthorization().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckVpcServiceControlsSupplyChain:
@@ -192,3 +261,14 @@ class TestCheckVpcServiceControlsSupplyChain:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session(perimeters=0)
+        service = session.service("accesscontextmanager", "v1")
+        service.accessPolicies.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckVpcServiceControlsSupplyChain().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"

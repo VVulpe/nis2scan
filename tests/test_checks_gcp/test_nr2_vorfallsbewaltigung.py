@@ -72,6 +72,15 @@ class TestCheckSccNotifications:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self, scc_client: MagicMock):
+        scc_client.list_notification_configs.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckSccNotifications().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckMonitoringAlertPolicies:
     def test_policies_produce_positive_evidence(self, monitoring_clients: MagicMock):
@@ -89,6 +98,15 @@ class TestCheckMonitoringAlertPolicies:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self, monitoring_clients: MagicMock):
+        monitoring_clients.list_alert_policies.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckMonitoringAlertPolicies().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckNotificationChannels:
@@ -108,6 +126,15 @@ class TestCheckNotificationChannels:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self, monitoring_clients: MagicMock):
+        monitoring_clients.list_notification_channels.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckNotificationChannels().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckLogBasedAlerts:
     def test_metrics_produce_positive_evidence(self, logging_clients: MagicMock):
@@ -126,6 +153,15 @@ class TestCheckLogBasedAlerts:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self, logging_clients: MagicMock):
+        logging_clients.list_log_metrics.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckLogBasedAlerts().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckLoggingSinks:
     def test_only_builtin_sinks_produce_finding(self, logging_clients: MagicMock):
@@ -139,6 +175,15 @@ class TestCheckLoggingSinks:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self, logging_clients: MagicMock):
+        logging_clients.list_sinks.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckLoggingSinks().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
     def test_custom_sink_with_export_destination_produces_positive_evidence(self, logging_clients: MagicMock):
         logging_clients.list_sinks.return_value = [

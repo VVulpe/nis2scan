@@ -12,6 +12,7 @@ from nis2scan.engine.providers.gcp.checks.nr3_bcm import (
     CheckCloudSqlHighAvailability,
     CheckDiskSnapshotSchedules,
     CheckDnsHealthChecks,
+    CheckGcsRetentionPolicy,
     CheckGcsVersioning,
     CheckMultiZoneDeployments,
 )
@@ -57,6 +58,17 @@ class TestCheckCloudSqlBackups:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self):
+        session = _sql_session(backup_enabled=True)
+        service = session.service("sqladmin", "v1beta4")
+        service.instances.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckCloudSqlBackups().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckCloudSqlHighAvailability:
     def test_regional_produces_positive_evidence(self):
@@ -70,6 +82,17 @@ class TestCheckCloudSqlHighAvailability:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = _sql_session(True, availability_type="REGIONAL")
+        service = session.service("sqladmin", "v1beta4")
+        service.instances.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckCloudSqlHighAvailability().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckGcsVersioning:
@@ -105,6 +128,62 @@ class TestCheckGcsVersioning:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self, storage_client: MagicMock):
+        storage_client.list_buckets.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckGcsVersioning().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
+
+class TestCheckGcsRetentionPolicy:
+    @pytest.fixture
+    def storage_client(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        from google.cloud import storage
+
+        client = MagicMock()
+        monkeypatch.setattr(storage, "Client", lambda credentials, project: client)
+        return client
+
+    def _bucket(self, retention_policy: object | None) -> SimpleNamespace:
+        return SimpleNamespace(
+            name="bucket-1",
+            location="EU",
+            versioning_enabled=False,
+            retention_policy=retention_policy,
+        )
+
+    def test_retention_policy_produces_positive_evidence(self, storage_client: MagicMock):
+        storage_client.list_buckets.return_value = [self._bucket(retention_policy={"retentionPeriod": "31536000"})]
+
+        result = asyncio.run(CheckGcsRetentionPolicy().execute(FakeGcpSession()))
+
+        compliant = _compliant(result)
+        assert len(compliant) == 1
+        assert compliant[0].current_state["retention_policy"] == "configured"
+        assert not _maengel(result)
+
+    def test_no_retention_policy_produces_finding(self, storage_client: MagicMock):
+        storage_client.list_buckets.return_value = [self._bucket(retention_policy=None)]
+
+        result = asyncio.run(CheckGcsRetentionPolicy().execute(FakeGcpSession()))
+
+        maengel = _maengel(result)
+        assert len(maengel) == 1
+        assert maengel[0].severity.value == "MEDIUM"
+        assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self, storage_client: MagicMock):
+        storage_client.list_buckets.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckGcsRetentionPolicy().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckMultiZoneDeployments:
     @pytest.fixture
@@ -136,6 +215,15 @@ class TestCheckMultiZoneDeployments:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self, instances_client: MagicMock):
+        instances_client.aggregated_list.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckMultiZoneDeployments().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckDiskSnapshotSchedules:
@@ -170,6 +258,15 @@ class TestCheckDiskSnapshotSchedules:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self, policies_client: MagicMock):
+        policies_client.aggregated_list.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckDiskSnapshotSchedules().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckDnsHealthChecks:
     @pytest.fixture
@@ -195,3 +292,12 @@ class TestCheckDnsHealthChecks:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self, dns_client: MagicMock):
+        dns_client.list_zones.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckDnsHealthChecks().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"

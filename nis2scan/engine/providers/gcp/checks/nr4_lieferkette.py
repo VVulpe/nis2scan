@@ -149,7 +149,13 @@ class CheckCrossProjectBindings(BaseCheck):
                             account_id=project_id,
                             current_state={
                                 "external_bindings": len(external_members),
-                                "external_members_sample": [m for m in external_members[:5]],
+                                # Key suffix _email (ADR-0011 deny-list) so the EXTERN report
+                                # profile pseudonymizes these member strings — they embed a
+                                # service-account e-mail address (CODE-1). Deliberately
+                                # SINGULAR: the deny-list regex requires the string to END
+                                # with _email, so a "grammatical fix" to _emails would
+                                # silently reopen the leak (legal-reviewer hint, 2026-07-24).
+                                "external_member_email": [m for m in external_members[:5]],
                             },
                             expected_state=(
                                 "Keine projektfremden IAM-Bindungen oder nur dokumentierte "

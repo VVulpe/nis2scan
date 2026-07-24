@@ -26,7 +26,7 @@ from nis2scan.engine.models.check import (
     CheckResult,
     derive_outcome,
 )
-from nis2scan.engine.models.config import ScanConfig
+from nis2scan.engine.models.config import ProviderConfig, ScanConfig
 from nis2scan.engine.models.finding import Finding, FindingStatus, Severity
 from nis2scan.engine.models.result import (
     SCHEMA_VERSION,
@@ -93,11 +93,17 @@ async def run_scan(
     checks = resolve_checks(config)
     logger.info("scan.started", scan_id=scan_id, check_count=len(checks))
 
+    # PERF-2: one session per enabled provider, created ONCE before the check
+    # loop — not per check. A fresh session used to mean a real AssumeRole /
+    # subscription- or project-discovery network call for every single check.
+    provider_sessions = create_provider_sessions(checks, config)
+
     for check in checks:
         bus.emit(ScanEvent.CHECK_STARTED, {"check_id": check.check_id})
 
         try:
-            result = await execute_check(check, config)
+            session = provider_sessions.get(check.provider.value.lower())
+            result = await execute_check(check, config, session)
         except Exception as exc:
             # Fail-safe (ADR-0016): a crashing check must never vanish from the
             # result — it is recorded as ERROR, not just emitted as an event.
@@ -216,29 +222,74 @@ def resolve_checks(config: ScanConfig) -> list[BaseCheck]:
     return checks
 
 
-async def execute_check(check: BaseCheck, config: ScanConfig) -> CheckResult:
-    """Execute a single check with the appropriate provider session."""
+def _create_provider_session(provider_name: str, provider_config: ProviderConfig) -> Any:
+    """Create the session for a single provider (lazy SDK imports, PERF-2)."""
+    if provider_name == "aws":
+        from nis2scan.engine.providers.aws.session import create_aws_session
+
+        return create_aws_session(provider_config)
+    if provider_name == "azure":
+        from nis2scan.engine.providers.azure.session import create_azure_session
+
+        return create_azure_session(provider_config)
+    if provider_name == "gcp":
+        from nis2scan.engine.providers.gcp.session import create_gcp_session
+
+        return create_gcp_session(provider_config)
+
+    msg = f"Unknown provider: {provider_name}"
+    raise ValueError(msg)
+
+
+def create_provider_sessions(checks: list[BaseCheck], config: ScanConfig) -> dict[str, Any]:
+    """Create one session per provider needed by ``checks``, before the check loop (PERF-2).
+
+    Previously every check triggered its own session creation in
+    execute_check — one real AssumeRole/subscription-/project-discovery
+    network call per check instead of per scan. Hoisting it here means each
+    enabled provider pays that cost exactly once, no matter how many checks
+    run against it.
+
+    A dict value is either the created session, or the exception raised while
+    creating it. Storing the exception (rather than raising immediately) keeps
+    this fail-safe (ADR-0016): execute_check re-raises it per check, so
+    run_scan's existing per-check try/except still turns a provider-wide
+    session failure into a CheckError for every affected check — exactly the
+    outcome a failing per-check session creation produced before this change.
+    """
+    sessions: dict[str, Any] = {}
+    provider_names = dict.fromkeys(check.provider.value.lower() for check in checks)
+    for provider_name in provider_names:
+        provider_config = config.providers.get(provider_name)
+        if not provider_config or not provider_config.enabled:
+            continue
+        try:
+            sessions[provider_name] = _create_provider_session(provider_name, provider_config)
+        except Exception as exc:
+            logger.error("scan.session_creation_failed", provider=provider_name, error=str(exc))
+            sessions[provider_name] = exc
+    return sessions
+
+
+async def execute_check(check: BaseCheck, config: ScanConfig, session: Any) -> CheckResult:
+    """Execute a single check with a pre-created provider session.
+
+    ``session`` comes from ``create_provider_sessions`` (one per enabled
+    provider, built once in run_scan before the check loop — PERF-2). If
+    session creation failed for this check's provider, ``session`` holds the
+    exception instead of a session object; re-raising it here lets run_scan's
+    existing fail-safe wrapper record it as a CheckError, same as before.
+    """
     provider_name = check.provider.value.lower()
     provider_config = config.providers.get(provider_name)
 
     if not provider_config or not provider_config.enabled:
         return CheckResult(check_id=check.check_id, skipped=True, skip_reason="Provider not enabled")
 
-    # Import session managers lazily to avoid import errors when SDKs are missing
-    session: Any
-    if provider_name == "aws":
-        from nis2scan.engine.providers.aws.session import create_aws_session
+    if isinstance(session, Exception):
+        raise session
 
-        session = create_aws_session(provider_config)
-    elif provider_name == "azure":
-        from nis2scan.engine.providers.azure.session import create_azure_session
-
-        session = create_azure_session(provider_config)
-    elif provider_name == "gcp":
-        from nis2scan.engine.providers.gcp.session import create_gcp_session
-
-        session = create_gcp_session(provider_config)
-    else:
+    if session is None:
         return CheckResult(check_id=check.check_id, skipped=True, skip_reason=f"Unknown provider: {provider_name}")
 
     return await check.execute(session)

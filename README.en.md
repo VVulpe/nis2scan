@@ -407,7 +407,7 @@ Detailed documentation of all required permissions:
 ```bash
 # Automatically generate a minimal IAM policy
 nis2scan permissions --provider aws --format terraform
-nis2scan permissions --provider azure --format azurecli
+nis2scan permissions --provider azure --format terraform
 ```
 
 ## Usage
@@ -417,11 +417,13 @@ nis2scan permissions --provider azure --format azurecli
 nis2scan scan --provider aws --config config.yaml
 
 # Only specific §30 areas
-nis2scan scan --provider aws --bsig-nr 8,9,10
+nis2scan scan --provider aws --scope 8 --scope 9 --scope 10
 
 # Output as JSON
-nis2scan scan --provider aws --format json --output report.json
+nis2scan scan --provider aws --format json --output ./reports
 ```
+
+- **Findings Exceptions:** Documented, time-boxed exceptions for findings an organization consciously decides not to fix (yet), via a YAML file and the `--exceptions` flag. Details: [Getting Started → Findings Exceptions](https://github.com/letaible/nis2scan/blob/main/docs/getting-started.md#findings-exceptions).
 
 ## Contributing
 

@@ -1,6 +1,7 @@
 """Tests for §30 Nr. 8 — Kryptographie AWS checks using moto."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import boto3
@@ -8,6 +9,7 @@ from moto import mock_aws
 
 from nis2scan.engine.models.finding import FindingStatus
 from nis2scan.engine.providers.aws.checks.nr8_kryptographie import (
+    CheckAcmCertificateExpiry,
     CheckEbsEncryption,
     CheckElbTlsMinVersion,
     CheckKmsKeyRotation,
@@ -190,6 +192,90 @@ class TestCheckEbsEncryption:
 
         assert len(result.findings) == 1
         assert result.findings[0].status == FindingStatus.COMPLIANT
+
+
+CERT_ARN = "arn:aws:acm:eu-central-1:123456789012:certificate/abc123"
+
+
+def _session_with_fake_acm(certificates: dict[str, dict]) -> AwsSession:
+    """moto's ACM request_certificate always issues NotAfter = now + 365 days —
+    expiry scenarios cannot be controlled through moto. Stub the ACM client
+    entirely so AWS-NR8-007 tests can control NotAfter deterministically
+    (pattern per _session_with_fake_elbv2 above).
+    """
+    session = _make_session()
+    acm = MagicMock()
+
+    paginator = MagicMock()
+    paginator.paginate.return_value = [{"CertificateSummaryList": [{"CertificateArn": arn} for arn in certificates]}]
+    acm.get_paginator.return_value = paginator
+
+    def describe_certificate(**kwargs):
+        return {"Certificate": certificates[kwargs["CertificateArn"]]}
+
+    acm.describe_certificate.side_effect = describe_certificate
+
+    real_client = session.client
+
+    def client(service: str, region: str | None = None):
+        if service == "acm":
+            return acm
+        return real_client(service, region=region)
+
+    session.client = client  # type: ignore[method-assign]
+    return session
+
+
+class TestCheckAcmCertificateExpiry:
+    """Tests for the AWS-NR8-007 ACM certificate expiry check."""
+
+    @mock_aws
+    def test_long_lived_certificate_produces_positive_evidence(self):
+        not_after = datetime.now(UTC) + timedelta(days=90)
+        session = _session_with_fake_acm(
+            {CERT_ARN: {"NotAfter": not_after, "DomainName": "example.com", "Status": "ISSUED"}}
+        )
+
+        result = asyncio.run(CheckAcmCertificateExpiry().execute(session))
+
+        compliant = [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
+        assert len(compliant) == 1
+        assert compliant[0].current_state["days_remaining"] >= 89
+        assert not result.errors
+
+    @mock_aws
+    def test_soon_expiring_certificate_produces_finding(self):
+        not_after = datetime.now(UTC) + timedelta(days=10)
+        session = _session_with_fake_acm(
+            {CERT_ARN: {"NotAfter": not_after, "DomainName": "example.com", "Status": "ISSUED"}}
+        )
+
+        result = asyncio.run(CheckAcmCertificateExpiry().execute(session))
+
+        non_compliant = [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+        assert len(non_compliant) == 1
+        assert non_compliant[0].severity.value == "HIGH"
+        assert not result.errors
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self):
+        session = _make_session()
+        acm = MagicMock()
+        acm.get_paginator.side_effect = RuntimeError("boom")
+        real_client = session.client
+
+        def client(service: str, region: str | None = None):
+            if service == "acm":
+                return acm
+            return real_client(service, region=region)
+
+        session.client = client  # type: ignore[method-assign]
+
+        result = asyncio.run(CheckAcmCertificateExpiry().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "AWSClientError"
 
 
 class TestCheckRdsEncryption:

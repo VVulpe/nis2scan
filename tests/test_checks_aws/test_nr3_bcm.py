@@ -9,6 +9,7 @@ from moto import mock_aws
 from nis2scan.engine.models.finding import FindingStatus
 from nis2scan.engine.providers.aws.checks.nr3_bcm import (
     CheckBackupPlans,
+    CheckEbsSnapshotEncryption,
     CheckRdsBackupRetention,
     CheckRdsMultiAz,
     CheckRoute53HealthChecks,
@@ -181,6 +182,53 @@ class TestCheckS3ObjectLock:
 
         assert not result.findings
         assert len(result.errors) == 1
+
+
+class TestCheckEbsSnapshotEncryption:
+    @mock_aws
+    def test_encrypted_snapshot_produces_positive_evidence(self):
+        session = _make_session()
+        ec2 = session.client("ec2")
+        volume = ec2.create_volume(AvailabilityZone="eu-central-1a", Size=10, Encrypted=True)
+        ec2.create_snapshot(VolumeId=volume["VolumeId"])
+
+        result = asyncio.run(CheckEbsSnapshotEncryption().execute(session))
+
+        compliant = _compliant(result)
+        assert len(compliant) == 1
+        assert compliant[0].current_state["encrypted"] is True
+        assert not _maengel(result)
+
+    @mock_aws
+    def test_unencrypted_snapshot_produces_finding(self):
+        session = _make_session()
+        ec2 = session.client("ec2")
+        volume = ec2.create_volume(AvailabilityZone="eu-central-1a", Size=10, Encrypted=False)
+        ec2.create_snapshot(VolumeId=volume["VolumeId"])
+
+        result = asyncio.run(CheckEbsSnapshotEncryption().execute(session))
+
+        maengel = _maengel(result)
+        assert len(maengel) == 1
+        assert maengel[0].current_state["encrypted"] is False
+        assert not _compliant(result)
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch: pytest.MonkeyPatch):
+        session = _make_session()
+        ec2 = session.client("ec2")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(ec2, "get_paginator", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: ec2)
+
+        result = asyncio.run(CheckEbsSnapshotEncryption().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
 
 
 class TestCheckRdsMultiAz:
