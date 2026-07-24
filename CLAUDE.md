@@ -254,6 +254,15 @@ Every integration workflow has a 4-step cleanup (always runs):
 
 ## Known Pitfalls & Constraints
 
+### CLI
+- Integration tests and the SaaS worker call the ENGINE directly — cli.py has
+  no coverage from them. The 0.1.0 `--profile` shadowing bug (ReportProfile
+  enum overwrote the AWS profile name, broke every CLI AWS scan) stayed
+  invisible until the 24.07.2026 audit. CLI changes need their own tests
+  (tests/test_cli/), and a CI smoke test of the CLI surface is planned (P1).
+- Exit codes since 0.1.5: 0 = no high/critical findings, 1 = high,
+  2 = critical, 3 = scan inconclusive (only errored checks, nothing assessed).
+
 ### AWS
 - `AwsSession.client()` uses `region=` NOT `region_name=` — this is a custom wrapper
 - CLI flag is `--region` (singular), NOT `--regions`
