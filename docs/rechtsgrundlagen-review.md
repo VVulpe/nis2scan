@@ -343,4 +343,5 @@ Verlaufsabschnitte (Batches Nr. 4–10) und der Kampagnen-Bilanz.
   Rechtsfolgen-Aussagen (ADR-0012), Fail-safe gewahrt (ADR-0016).
   Qualitätsgates: 513 Unit-Tests grün, ruff/format/mypy strict sauber
   (durch Orchestrator unabhängig verifiziert).
-- **Gründer-Vermerk: AUSSTEHEND** — ohne beide Vermerke kein Merge.
+- **Gründer-Vermerk: ERTEILT (Chat-Freigabe 24.07.2026 „erteilt, du hast
+  mein Go").** Beide ADR-0018-Vermerke liegen vor — Merge frei.
