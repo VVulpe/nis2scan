@@ -13,7 +13,7 @@ from nis2scan.engine.models.finding import Finding
 # From here on SemVer evolution rules apply — minors are strictly additive,
 # breaking changes require a major bump with a documented migration path.
 # History: docs/schema-changelog.md.
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 
 
 class Erfuellungsgrad(StrEnum):
@@ -66,6 +66,11 @@ class ComplianceScore(BaseModel):
     # (founder decision 2026-07-13) — removal scheduled for schema 2.0.
     # Value is derived; erfuellungsgrad is authoritative.
     score_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    # Findings-Exceptions (ADR-0026): additive, second-track disclosure only —
+    # failed_checks/critical_count/etc. above are NOT redefined by exceptions,
+    # they still count every non-compliant finding. This is purely "of which
+    # N are accepted via a documented exception" (no silent Herausrechnung).
+    exceptions_accepted_count: int = 0
 
 
 class ComplianceSummary(BaseModel):
@@ -96,6 +101,11 @@ class ComplianceSummary(BaseModel):
     areas_scanned: int = 0
     scores_by_area: list[ComplianceScore] = Field(default_factory=list)
 
+    # Findings-Exceptions (ADR-0026): total across all areas, same additive
+    # second-track semantics as ComplianceScore.exceptions_accepted_count —
+    # total_findings/severity counts above are unchanged by exceptions.
+    exceptions_accepted_count: int = 0
+
     # DEPRECATED (ADR-0008): retained in schema 1.0 for SaaS compatibility
     # (founder decision 2026-07-13) — removal scheduled for schema 2.0.
     # overall_status is derived from erfuellungsgrad_gesamt (NICHT_BEWERTBAR
@@ -113,6 +123,15 @@ class ScanMetadata(BaseModel):
     azure_sdk_version: str | None = None
     gcp_sdk_version: str | None = None
     scan_duration_seconds: float = 0.0
+    # Findings-Exceptions (ADR-0026): set only when ScanConfig.exceptions_path
+    # was provided. exceptions_file is the path as configured (for
+    # traceability in the JSON contract); exceptions_applied counts findings
+    # annotated with an active rule; exceptions_expired counts rules that
+    # matched a finding but had already expired (never applied — see
+    # engine/finding_exceptions.apply_exceptions).
+    exceptions_file: str | None = None
+    exceptions_applied: int = 0
+    exceptions_expired: int = 0
 
 
 class ScanResult(BaseModel):

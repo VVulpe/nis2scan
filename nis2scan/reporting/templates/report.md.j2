@@ -14,12 +14,18 @@
 | Eigenschaft | Wert |
 |-------------|------|
 | **Erfüllungsgrad (cloud-technischer Teilaspekt)** | **{{ erfuellungsgrad_labels[summary.erfuellungsgrad_gesamt] }}** |
+{% if findings_with_exception %}
+| Zusatzsicht: Bereiche strikt erfüllt oder alle Mängel per dokumentierter Ausnahme akzeptiert | {{ effective_erfuellt_total }} von {{ summary.scores_by_area | length }} (davon {{ strict_erfuellt_total }} strikt erfüllt) |
+{% endif %}
 | **Checks ausgeführt** | {{ summary.total_checks }} |
 | **Checks bestanden (von anwendbaren)** | {{ summary.passed_checks }}/{{ summary.total_checks - summary.not_applicable_checks }} |
 | **Checks nicht bestanden** | {{ summary.failed_checks }} |
 | **Checks nicht anwendbar (keine Prüfobjekte)** | {{ summary.not_applicable_checks }} |
 | **Checks mit Fehler (nicht ausgewertet)** | {{ summary.error_checks }} |
 | **Mängel gesamt** | {{ summary.total_findings }} |
+{% if summary.exceptions_accepted_count > 0 %}
+| — davon per dokumentierter Ausnahme akzeptiert | {{ summary.exceptions_accepted_count }} |
+{% endif %}
 {% if summary.compliant_count > 0 %}
 | **Positivnachweise** | {{ summary.compliant_count }} |
 {% endif %}
@@ -40,13 +46,17 @@ Der Erfüllungsgrad bewertet ausschließlich den cloud-technisch prüfbaren Teil
 
 ### Compliance-Matrix §30 BSIG
 
-| §30 Nr. | Bereich | Erfüllungsgrad | Checks bestanden | N. a. | Fehler | Mängel | Kritisch | Hoch |
-|----------|---------|----------------|------------------|-------|--------|--------|----------|------|
+| §30 Nr. | Bereich | Erfüllungsgrad | Checks bestanden | N. a. | Fehler | Mängel | davon Ausnahme | Kritisch | Hoch |
+|----------|---------|----------------|------------------|-------|--------|--------|-----------------|----------|------|
 {% for score in summary.scores_by_area %}
-| {{ score.bsig_30_nr }} | {{ score.area_name }} | {{ erfuellungsgrad_labels[score.erfuellungsgrad] }} | {{ score.passed_checks }}/{{ score.total_checks - score.not_applicable_checks }} | {{ score.not_applicable_checks }} | {{ score.error_checks }} | {{ score.failed_checks }} | {{ score.critical_count }} | {{ score.high_count }} |
+| {{ score.bsig_30_nr }} | {{ score.area_name }} | {{ erfuellungsgrad_labels[score.erfuellungsgrad] }}{{ ' \\*' if score.bsig_30_nr in effective_erfuellt_area_nrs else '' }} | {{ score.passed_checks }}/{{ score.total_checks - score.not_applicable_checks }} | {{ score.not_applicable_checks }} | {{ score.error_checks }} | {{ score.failed_checks }} | {{ score.exceptions_accepted_count if score.exceptions_accepted_count > 0 else '-' }} | {{ score.critical_count }} | {{ score.high_count }} |
 {% endfor %}
 
-„Checks bestanden" zählt nur anwendbare Checks (mit Prüfobjekten in der Umgebung). „N. a." = nicht anwendbar: keine Prüfobjekte vorhanden — kein Nachweis, kein Mangel.
+„Checks bestanden" zählt nur anwendbare Checks (mit Prüfobjekten in der Umgebung). „N. a." = nicht anwendbar: keine Prüfobjekte vorhanden — kein Nachweis, kein Mangel. „davon Ausnahme" nennt Mängel, die per dokumentierter Ausnahme akzeptiert sind (Abschnitt „Ausnahmen") — sie zählen in der Mängel-Spalte weiterhin voll mit, keine stille Herausrechnung.
+{% if effective_erfuellt_area_nrs %}
+
+\* Zusatzsicht: Sämtliche Mängel dieses Bereichs sind durch aktive dokumentierte Ausnahmen akzeptiert (Risikoentscheidung der Einrichtung); Checkfehler liegen nicht vor. Die strikte Bewertung in der Spalte „Erfüllungsgrad" gilt unverändert — eine Ausnahme beseitigt den Mangel nicht, sie dokumentiert seine Akzeptanz.
+{% endif %}
 
 ---
 
@@ -87,6 +97,38 @@ Keine Mängel festgestellt.
 
 {% endfor %}
 {% endfor %}
+
+---
+
+### Ausnahmen
+
+Dokumentierte, befristete Ausnahmen unterdrücken keinen Befund — der Mangel bleibt oben sichtbar und zählt in den Mängel-Zahlen weiterhin voll mit. Diese Sektion macht zusätzlich transparent, welche Mängel die Einrichtung bewusst und nachvollziehbar akzeptiert hat. Eine dokumentierte Ausnahme ist eine Risikoentscheidung der Einrichtung; sie beseitigt den technischen Mangel nicht und nimmt eine Bewertung durch Auditor oder Aufsicht nicht vorweg.
+
+{% if result.report_profile == 'extern' and (findings_with_exception or findings_with_expired_exception) %}
+Hinweis: Vermerk, Autor und Ticket stammen unverändert aus der Ausnahmen-Datei der Einrichtung und werden bei der Pseudonymisierung nicht verändert. Personenbezogene Angaben (z. B. Klarnamen im Autor-Feld) und Ressourcen-Bezeichner im Vermerk erscheinen daher auch in diesem externen Report im Klartext.
+
+{% endif %}
+{% if not findings_with_exception %}
+Keine dokumentierten Ausnahmen angewendet.
+{% else %}
+| Check | Ressource | Vermerk | Befristet bis | Autor/Ticket |
+|-------|-----------|---------|----------------|--------------|
+{% for finding in findings_with_exception %}
+| {{ finding.check_id }} | `{{ finding.resource_id }}` | {{ finding.exception.reason }} | {{ finding.exception.expires.strftime('%d.%m.%Y') }} | {{ finding.exception.author or '–' }}{% if finding.exception.ticket %} / {{ finding.exception.ticket }}{% endif %} |
+{% endfor %}
+{% endif %}
+
+{% if findings_with_expired_exception %}
+#### ⚠️ Abgelaufene Ausnahmen
+
+Für folgende Mängel lag eine dokumentierte Ausnahme vor, die zum Scan-Zeitpunkt bereits abgelaufen war. Sie greift nicht mehr — der Befund zählt wieder in vollem Umfang als offen und ist oben unter „Mängel nach §30-Bereich" regulär aufgeführt.
+
+| Check | Ressource | Vermerk | Befristet bis |
+|-------|-----------|---------|----------------|
+{% for finding in findings_with_expired_exception %}
+| {{ finding.check_id }} | `{{ finding.resource_id }}` | {{ finding.expired_exception.reason }} | {{ finding.expired_exception.expires.strftime('%d.%m.%Y') }} |
+{% endfor %}
+{% endif %}
 
 {% if positive_by_area %}
 ---
@@ -180,6 +222,13 @@ Dieser Scan bewertet ausschließlich den cloud-technisch prüfbaren Teilaspekt j
 | boto3-Version | {{ result.metadata.boto3_version }} |
 {% endif %}
 | Scan-Dauer | {{ "%.1f" | format(result.metadata.scan_duration_seconds) }}s |
+{% if result.metadata.exceptions_file %}
+| Ausnahmen-Datei | {{ result.metadata.exceptions_file }} |
+| Ausnahmen angewendet | {{ result.metadata.exceptions_applied }} |
+{% if result.metadata.exceptions_expired > 0 %}
+| Abgelaufene Ausnahmen-Regeln | {{ result.metadata.exceptions_expired }} |
+{% endif %}
+{% endif %}
 
 ### Anhang B: §30 BSIG Referenz
 

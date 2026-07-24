@@ -1,7 +1,9 @@
 """Tests for build_summary — Erfüllungsgrad aggregation and check counts (ADR-0007/0008/0016)."""
 
+from datetime import date
+
 from nis2scan.engine.models.check import CheckOutcome
-from nis2scan.engine.models.finding import CloudProvider, Finding, FindingStatus, Severity
+from nis2scan.engine.models.finding import CloudProvider, Finding, FindingExceptionInfo, FindingStatus, Severity
 from nis2scan.engine.models.result import CheckOutcomeEntry, Erfuellungsgrad
 from nis2scan.engine.scanner import build_summary
 
@@ -148,3 +150,42 @@ class TestFindingStatusSeparation:
         assert summary.critical_count == 0  # the CRITICAL finding is compliant evidence
         area = summary.scores_by_area[0]
         assert area.critical_count == 0
+
+
+class TestExceptionsAcceptedCount:
+    """ADR-0026: additive second-track disclosure — existing counts unchanged."""
+
+    def test_accepted_exception_counted_additively_not_subtracted(self):
+        excepted = _finding(1)
+        excepted.exception = FindingExceptionInfo(reason="Akzeptiertes Risiko", expires=date(2099, 1, 1))
+        open_finding = _finding(1)
+        entries = [_entry(1, CheckOutcome.FAILED)]
+
+        summary = build_summary([excepted, open_finding], [1], entries)
+
+        # Existing counts are NOT redefined by exceptions (ADR-0026 decision 4).
+        assert summary.total_findings == 2
+        assert summary.high_count == 2
+        assert summary.scores_by_area[0].failed_checks == 1
+        # Additive second-track count.
+        assert summary.exceptions_accepted_count == 1
+        assert summary.scores_by_area[0].exceptions_accepted_count == 1
+
+    def test_no_exceptions_defaults_to_zero(self):
+        summary = build_summary([_finding(1)], [1], [_entry(1, CheckOutcome.FAILED)])
+
+        assert summary.exceptions_accepted_count == 0
+        assert summary.scores_by_area[0].exceptions_accepted_count == 0
+
+    def test_accepted_count_split_per_area(self):
+        f1 = _finding(1)
+        f1.exception = FindingExceptionInfo(reason="ok", expires=date(2099, 1, 1))
+        f2 = _finding(2)  # not excepted
+        entries = [_entry(1, CheckOutcome.FAILED), _entry(2, CheckOutcome.FAILED)]
+
+        summary = build_summary([f1, f2], [1, 2], entries)
+
+        by_nr = {s.bsig_30_nr: s.exceptions_accepted_count for s in summary.scores_by_area}
+        assert by_nr[1] == 1
+        assert by_nr[2] == 0
+        assert summary.exceptions_accepted_count == 1

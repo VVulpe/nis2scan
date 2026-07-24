@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -111,8 +112,14 @@ def scan(
         "--external-id",
         help="AWS: ExternalId der Vertrauensrichtlinie (Confused-Deputy-Schutz) zur angenommenen Rolle",
     ),
+    exceptions: Path | None = typer.Option(
+        None,
+        "--exceptions",
+        help="Pfad zu einer Ausnahmen-Datei (YAML) mit dokumentierten, befristeten Ausnahmen",
+    ),
 ) -> None:
     """Führt einen NIS2-Compliance-Scan durch."""
+    from nis2scan.engine.finding_exceptions import ExceptionsFileError, find_long_running_rules, load_exceptions_file
     from nis2scan.reporting.pseudonymize import ReportProfile
 
     try:
@@ -120,6 +127,23 @@ def scan(
     except ValueError:
         console.print(f"[red]Ungültiges Report-Profil: {report_profile}. Erlaubt: intern, extern[/red]")
         raise typer.Exit(code=1) from None
+
+    if exceptions is not None:
+        # Fail-safe (ADR-0026): validate eagerly so a broken exceptions file
+        # aborts the scan instead of being silently ignored. run_scan loads
+        # it again engine-side (ADR-0026 consequence: annotation must happen
+        # in the engine, not just here), so both paths always agree.
+        try:
+            exceptions_file = load_exceptions_file(exceptions)
+        except ExceptionsFileError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(code=1) from None
+
+        for rule in find_long_running_rules(exceptions_file, datetime.now(UTC).date()):
+            console.print(
+                f"[yellow]⚠ Ausnahme {rule.check_id} / {rule.resource_id} läuft ab heute noch länger als "
+                f"12 Monate (bis {rule.expires.isoformat()}) — Wiedervorlage empfohlen.[/yellow]"
+            )
 
     console.print(
         Panel.fit(
@@ -132,7 +156,7 @@ def scan(
 
     # Load config from YAML if it exists, otherwise use CLI args
     scan_config = _build_config(
-        config_file, provider, profile, regions, scope, output_dir, format, assume_role_arn, external_id
+        config_file, provider, profile, regions, scope, output_dir, format, assume_role_arn, external_id, exceptions
     )
 
     # Register check modules
@@ -158,16 +182,23 @@ def scan(
     event_bus.subscribe(ScanEvent.FINDING_CRITICAL, on_critical)
 
     # Run scan
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Scanning...", total=None)
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Scanning...", total=None)
 
-        result = asyncio.run(run_scan(scan_config, event_bus))
+            result = asyncio.run(run_scan(scan_config, event_bus))
 
-        progress.update(task, description="Scan abgeschlossen", completed=True)
+            progress.update(task, description="Scan abgeschlossen", completed=True)
+    except ExceptionsFileError as e:
+        # Defense in depth: run_scan loads the exceptions file again
+        # engine-side (see comment above) and could still fail here, e.g. if
+        # the file changed between the pre-check and scan start.
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from None
 
     # Print summary
     _print_summary(result.summary)
@@ -290,6 +321,7 @@ def _build_config(
     formats: list[str],
     assume_role_arn: str | None = None,
     external_id: str | None = None,
+    exceptions_path: Path | None = None,
 ) -> ScanConfig:
     """Build ScanConfig from YAML file and CLI overrides."""
     config_data: dict[str, Any] = {}
@@ -315,6 +347,9 @@ def _build_config(
         bsig_30_scope=scope,
         output_formats=formats,
         output_dir=output_dir,
+        # Findings-Exceptions (ADR-0026): opt-in via --exceptions; None means
+        # no exceptions are ever applied (no implicit default file).
+        exceptions_path=str(exceptions_path) if exceptions_path else None,
     )
 
 
@@ -348,6 +383,8 @@ def _print_summary(summary: "ComplianceSummary") -> None:
             f"Ergebnis unbekannt, gilt nicht als bestanden[/bold red]"
         )
     console.print(f"Mängel gesamt: {summary.total_findings}")
+    if summary.exceptions_accepted_count > 0:
+        console.print(f"  davon per dokumentierter Ausnahme akzeptiert: {summary.exceptions_accepted_count}")
     if summary.compliant_count > 0:
         console.print(f"Positivnachweise: {summary.compliant_count}")
 

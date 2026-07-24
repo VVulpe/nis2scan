@@ -58,3 +58,9 @@ class ScanConfig(BaseModel):
     output_formats: list[str] = Field(default_factory=lambda: ["json", "markdown"])
     output_dir: str = "./reports"
     include_evidence: bool = True
+    # Findings-Exceptions (ADR-0026): path to a customer-owned YAML file with
+    # documented, time-boxed exceptions. None (default) means no exceptions are
+    # applied — there is no implicit default file, so nothing is ever
+    # suppressed by surprise. Loaded and applied engine-side (run_scan), not
+    # just at report time, so JSON/Markdown/PDF/SaaS share the same view.
+    exceptions_path: str | None = None
