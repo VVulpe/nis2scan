@@ -1,8 +1,10 @@
 """nis2scan CLI — the primary user interface for running NIS2 compliance scans."""
 
 import asyncio
+import contextlib
 import json
 import os
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,6 +20,7 @@ from rich.table import Table
 from nis2scan import __version__
 from nis2scan.engine.events import EventBus, ScanEvent
 from nis2scan.engine.models.config import CompanyInfo, ProviderConfig, ScanConfig
+from nis2scan.engine.models.finding import CloudProvider
 from nis2scan.engine.providers.aws import register_all_aws_checks
 from nis2scan.engine.providers.azure import register_all_azure_checks
 from nis2scan.engine.providers.gcp import register_all_gcp_checks
@@ -29,8 +32,45 @@ from nis2scan.reporting.markdown import export_markdown
 if TYPE_CHECKING:
     from nis2scan.engine.models.result import ComplianceSummary
 
+
+def _reconfigure_stream_encoding(stream: Any) -> None:
+    """Force UTF-8 on the given stream so German umlauts/§ render correctly on
+    Windows consoles instead of mojibake (fail-safe hotfix, Bug 4).
+
+    ``reconfigure`` only exists on real ``io.TextIOWrapper`` streams — piped,
+    redirected, or otherwise replaced streams (e.g. under some CI runners or
+    test harnesses) may lack it entirely. Fail silently rather than crash the
+    CLI at startup; the encoding simply stays whatever it already was.
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        with contextlib.suppress(AttributeError, ValueError, OSError):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+# Must run before any CLI output — module import time, before logger/console
+# are created, so every code path (including error paths at import time) benefits.
+_reconfigure_stream_encoding(sys.stdout)
+_reconfigure_stream_encoding(sys.stderr)
+
 logger = structlog.get_logger()
 console = Console()
+
+# Fix 3 (fail-safe hotfix): the only valid --provider values, derived from the
+# canonical CloudProvider enum instead of duplicating a literal list.
+_VALID_PROVIDERS = {p.value.lower() for p in CloudProvider}
+
+
+def _validate_provider(provider: str) -> None:
+    """Abort with a German error + exit 1 on an unknown --provider value.
+
+    Without this, a typo like ``--provider awss`` silently registered zero
+    checks and produced an empty 0/0 report at exit 0 (audit finding, Bug 3).
+    """
+    if provider.lower() not in _VALID_PROVIDERS:
+        console.print(f"[red]Unbekannter Provider: {provider}. Erlaubt: aws, azure, gcp[/red]")
+        raise typer.Exit(code=1)
+
 
 app = typer.Typer(
     name="nis2scan",
@@ -122,8 +162,17 @@ def scan(
     from nis2scan.engine.finding_exceptions import ExceptionsFileError, find_long_running_rules, load_exceptions_file
     from nis2scan.reporting.pseudonymize import ReportProfile
 
+    _validate_provider(provider)
+
     try:
-        profile = ReportProfile(report_profile.lower())
+        # Fix 1 (fail-safe hotfix, P0): this MUST NOT be named `profile` — the
+        # `profile` parameter above is the AWS CLI profile name and flows into
+        # _build_config()/ProviderConfig.profile. Reusing the name here used to
+        # silently shadow it, so every CLI scan got AwsSession(profile_name="intern"
+        # or "extern") instead of the user's AWS profile (or None) — --profile was
+        # a no-op since 0.1.0. Keep this a distinctly named variable and use it
+        # ONLY for the report export calls below, never for _build_config.
+        report_profile_enum = ReportProfile(report_profile.lower())
     except ValueError:
         console.print(f"[red]Ungültiges Report-Profil: {report_profile}. Erlaubt: intern, extern[/red]")
         raise typer.Exit(code=1) from None
@@ -208,11 +257,11 @@ def scan(
     out_path.mkdir(parents=True, exist_ok=True)
 
     if "json" in format:
-        json_path = export_json(result, out_path, profile)
+        json_path = export_json(result, out_path, report_profile_enum)
         console.print(f"\n[green]JSON-Report:[/green] {json_path}")
 
     if "markdown" in format:
-        md_path = export_markdown(result, out_path, profile)
+        md_path = export_markdown(result, out_path, report_profile_enum)
         console.print(f"[green]Markdown-Report:[/green] {md_path}")
 
     # Additional formats come from installed plugins (ADR-0014/0019)
@@ -231,12 +280,29 @@ def scan(
                 console.print(f"[red]Unbekanntes Ausgabeformat:[/red] {fmt}")
             continue
         try:
-            report_path = exporter(result, out_path, profile)
+            report_path = exporter(result, out_path, report_profile_enum)
             console.print(f"[green]{fmt.upper()}-Report:[/green] {report_path}")
         except Exception as e:  # plugin failures must not hide the scan results
             console.print(str(e))
 
-    # Exit code based on severity
+    # Exit-Code-Semantik (Fix 2, fail-safe hotfix):
+    #   0 = keine hohen/kritischen Mängel
+    #   1 = mindestens ein High-Mangel
+    #   2 = mindestens ein Critical-Mangel
+    #   3 = Scan nicht aussagekräftig — alle anwendbaren Checks sind mit
+    #       Fehlern geendet, kein einziger Check konnte erfolgreich (PASSED
+    #       oder FAILED) ausgewertet werden. A real FAILED check still counts
+    #       as meaningful (a genuine defect was found), so exit 3 fires only
+    #       when there is truly nothing to report on.
+    # The error count itself is already surfaced by _print_summary ("gilt
+    # nicht als bestanden"), so no extra warning line is printed here.
+    if result.summary.error_checks > 0 and result.summary.passed_checks == 0 and result.summary.failed_checks == 0:
+        console.print(
+            f"[bold red]Scan nicht aussagekräftig: {result.summary.error_checks} Checks mit Fehlern, "
+            f"kein Check erfolgreich ausgewertet.[/bold red]"
+        )
+        raise typer.Exit(code=3)
+
     if result.summary.critical_count > 0:
         raise typer.Exit(code=2)
     elif result.summary.high_count > 0:
@@ -277,6 +343,8 @@ def permissions(
     format: str = typer.Option("list", "--format", "-f", help="Ausgabeformat: list, terraform, json"),
 ) -> None:
     """Zeigt die benötigten Cloud-Permissions für alle Checks an."""
+    _validate_provider(provider)
+
     if provider.lower() == "aws":
         register_all_aws_checks()
     elif provider.lower() == "azure":
