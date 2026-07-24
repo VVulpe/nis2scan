@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
 
 import boto3
 from moto import mock_aws
@@ -12,7 +14,9 @@ from nis2scan.engine.providers.aws.checks.nr9_zugriffskontrolle import (
     CheckIamMfa,
     CheckIamWildcardPolicy,
     CheckS3BucketPolicy,
+    CheckS3PublicAccessBlock,
     CheckSecurityGroupOpenAccess,
+    CheckUnusedIamCredentials,
 )
 from nis2scan.engine.providers.aws.session import AwsSession
 
@@ -87,6 +91,24 @@ class TestCheckIamMfa:
 
         assert len(result.findings) == 0
 
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        iam = session.client("iam")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(iam, "get_paginator", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: iam)
+
+        check = CheckIamMfa()
+        result = asyncio.run(check.execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
+
 
 class TestCheckIamAccessKeyAge:
     """Tests for IAM access key age check."""
@@ -114,6 +136,24 @@ class TestCheckIamAccessKeyAge:
         result = asyncio.run(check.execute(session))
 
         assert len(result.findings) == 0
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        iam = session.client("iam")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(iam, "get_paginator", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: iam)
+
+        check = CheckIamAccessKeyAge()
+        result = asyncio.run(check.execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
 
 
 class TestCheckSecurityGroupOpenAccess:
@@ -265,6 +305,24 @@ class TestCheckSecurityGroupOpenAccess:
         assert len(sg_findings) == 1
         assert sg_findings[0].status == FindingStatus.COMPLIANT
 
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        ec2 = session.client("ec2", region="eu-central-1")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(ec2, "get_paginator", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: ec2)
+
+        check = CheckSecurityGroupOpenAccess()
+        result = asyncio.run(check.execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
+
 
 class TestCheckIamWildcardPolicy:
     """Tests for IAM wildcard policy check (B-9-3)."""
@@ -312,6 +370,24 @@ class TestCheckIamWildcardPolicy:
         assert len(maengel) == 0
         compliant = [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
         assert len(compliant) == 1
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        iam = session.client("iam")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(iam, "get_paginator", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: iam)
+
+        check = CheckIamWildcardPolicy()
+        result = asyncio.run(check.execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
 
 
 class TestCheckS3BucketPolicy:
@@ -401,3 +477,151 @@ class TestCheckS3BucketPolicy:
         bucket_findings = [f for f in result.findings if bucket_name in f.resource_id]
         assert len(bucket_findings) == 1
         assert bucket_findings[0].status == FindingStatus.COMPLIANT
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        s3 = session.client("s3")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(s3, "list_buckets", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: s3)
+
+        check = CheckS3BucketPolicy()
+        result = asyncio.run(check.execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
+
+
+class TestCheckS3PublicAccessBlock:
+    @mock_aws
+    def test_all_blocked_produces_positive_evidence(self):
+        session = _make_session()
+        s3control = session.client("s3control")
+        s3control.put_public_access_block(
+            AccountId="123456789012",
+            PublicAccessBlockConfiguration={
+                "BlockPublicAcls": True,
+                "IgnorePublicAcls": True,
+                "BlockPublicPolicy": True,
+                "RestrictPublicBuckets": True,
+            },
+        )
+
+        check = CheckS3PublicAccessBlock()
+        result = asyncio.run(check.execute(session))
+
+        compliant = [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
+        assert len(compliant) == 1
+        assert not result.errors
+
+    @mock_aws
+    def test_not_configured_produces_critical_finding(self):
+        session = _make_session()
+
+        check = CheckS3PublicAccessBlock()
+        result = asyncio.run(check.execute(session))
+
+        maengel = [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+        assert len(maengel) == 1
+        assert maengel[0].severity.value == "CRITICAL"
+        assert maengel[0].current_state["public_access_block"] == "not_configured"
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        s3control = session.client("s3control")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(s3control, "get_public_access_block", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: s3control)
+
+        check = CheckS3PublicAccessBlock()
+        result = asyncio.run(check.execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
+
+def _session_with_fake_iam_keys(keys: list[dict], last_used: dict[str, dict]) -> AwsSession:
+    """Fully stub the IAM client so AWS-NR9-007 tests can control key age and
+    last-used state deterministically — moto never populates LastUsedDate
+    (get_access_key_last_used always returns it absent), so the "actively
+    used" / "stale but used before" branches cannot be reached through moto.
+    """
+    session = _make_session()
+    iam = MagicMock()
+
+    paginator = MagicMock()
+    paginator.paginate.return_value = [
+        {"Users": [{"UserName": "testuser", "Arn": "arn:aws:iam::123456789012:user/testuser"}]}
+    ]
+    iam.get_paginator.return_value = paginator
+    iam.list_access_keys.return_value = {"AccessKeyMetadata": keys}
+
+    def get_access_key_last_used(**kwargs):
+        return {"AccessKeyLastUsed": last_used.get(kwargs["AccessKeyId"], {})}
+
+    iam.get_access_key_last_used.side_effect = get_access_key_last_used
+
+    real_client = session.client
+
+    def client(service: str, region: str | None = None):
+        if service == "iam":
+            return iam
+        return real_client(service, region=region)
+
+    session.client = client  # type: ignore[method-assign]
+    return session
+
+
+class TestCheckUnusedIamCredentials:
+    @mock_aws
+    def test_recently_used_key_produces_positive_evidence(self):
+        session = _session_with_fake_iam_keys(
+            keys=[{"AccessKeyId": "AKIA1", "Status": "Active", "CreateDate": datetime.now(UTC) - timedelta(days=200)}],
+            last_used={"AKIA1": {"LastUsedDate": datetime.now(UTC) - timedelta(days=5)}},
+        )
+
+        check = CheckUnusedIamCredentials()
+        result = asyncio.run(check.execute(session))
+
+        compliant = [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
+        assert len(compliant) == 1
+        assert compliant[0].current_state["days_unused"] == 5
+        assert not result.errors
+
+    @mock_aws
+    def test_stale_key_produces_finding(self):
+        session = _session_with_fake_iam_keys(
+            keys=[{"AccessKeyId": "AKIA1", "Status": "Active", "CreateDate": datetime.now(UTC) - timedelta(days=200)}],
+            last_used={"AKIA1": {"LastUsedDate": datetime.now(UTC) - timedelta(days=200)}},
+        )
+
+        check = CheckUnusedIamCredentials()
+        result = asyncio.run(check.execute(session))
+
+        maengel = [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+        assert len(maengel) == 1
+        assert maengel[0].severity.value == "MEDIUM"
+        assert not result.errors
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self):
+        session = _session_with_fake_iam_keys(keys=[], last_used={})
+        iam = session.client("iam")
+        iam.list_access_keys.side_effect = RuntimeError("boom")
+
+        check = CheckUnusedIamCredentials()
+        result = asyncio.run(check.execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "AWSClientError"

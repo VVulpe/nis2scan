@@ -54,6 +54,17 @@ class TestCheckIamLeastPrivilege:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session([])
+        service = session.service("cloudresourcemanager", "v1")
+        service.projects.return_value.getIamPolicy.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckIamLeastPrivilege().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckServiceAccountHygiene:
     def _session(self, keys: list[dict]) -> FakeGcpSession:
@@ -92,6 +103,18 @@ class TestCheckServiceAccountHygiene:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session([])
+        service = session.service("iam", "v1")
+        sa_chain = service.projects.return_value.serviceAccounts.return_value
+        sa_chain.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckServiceAccountHygiene().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckIdentityAwareProxy:
     def _session(self, bindings: list[dict]) -> FakeGcpSession:
@@ -126,6 +149,18 @@ class TestCheckIdentityAwareProxy:
         assert maengel[0].severity.value == "HIGH"
         assert maengel[0].title == "IAP-Zugriff öffentlich freigegeben"
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session([])
+        service = session.service("iap")
+        chain = service.projects.return_value.iap_tunnel.return_value
+        chain.getIamPolicy.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckIdentityAwareProxy().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckVpcFirewallRules:
@@ -214,6 +249,15 @@ class TestCheckVpcFirewallRules:
 
         assert not result.findings
 
+    def test_api_error_produces_check_error_no_finding(self, firewalls_client: MagicMock):
+        firewalls_client.list.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckVpcFirewallRules().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckStorageBucketPublicAccess:
     @pytest.fixture
@@ -243,6 +287,15 @@ class TestCheckStorageBucketPublicAccess:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self, storage_client: MagicMock):
+        storage_client.list_buckets.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckStorageBucketPublicAccess().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckOrgConstraints:
@@ -326,6 +379,17 @@ class TestCheckOrgConstraints:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session([])
+        service = session.service("orgpolicy", "v2")
+        service.projects.return_value.policies.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckOrgConstraints().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckInactivePrincipals:
     def _session(self, recommendations: list[dict]) -> FakeGcpSession:
@@ -347,6 +411,18 @@ class TestCheckInactivePrincipals:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session([])
+        service = session.service("recommender")
+        chain = service.projects.return_value.locations.return_value.recommenders.return_value
+        chain.recommendations.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckInactivePrincipals().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckVpcServiceControls:
@@ -371,3 +447,14 @@ class TestCheckVpcServiceControls:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session(perimeters=0)
+        service = session.service("accesscontextmanager", "v1")
+        service.accessPolicies.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckVpcServiceControls().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"

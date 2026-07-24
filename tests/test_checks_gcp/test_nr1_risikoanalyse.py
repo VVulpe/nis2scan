@@ -50,6 +50,15 @@ class TestCheckSecurityCommandCenter:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self, scc_client: MagicMock):
+        scc_client.list_sources.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckSecurityCommandCenter().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckOrgPolicies:
     def _session(self, policies: int) -> FakeGcpSession:
@@ -70,6 +79,17 @@ class TestCheckOrgPolicies:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session(policies=0)
+        service = session.service("orgpolicy", "v2")
+        service.projects.return_value.policies.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckOrgPolicies().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
 
 
 class TestCheckAuditLogConfig:
@@ -111,6 +131,17 @@ class TestCheckAuditLogConfig:
         assert maengel[0].title == "Audit-Logs nicht für alle Dienste konfiguriert"
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session(audit_configs=0)
+        service = session.service("cloudresourcemanager", "v1")
+        service.projects.return_value.getIamPolicy.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckAuditLogConfig().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckAssetInventory:
     @pytest.fixture
@@ -136,3 +167,12 @@ class TestCheckAssetInventory:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self, asset_client: MagicMock):
+        asset_client.list_feeds.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckAssetInventory().execute(FakeGcpSession()))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"

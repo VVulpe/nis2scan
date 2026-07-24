@@ -1,5 +1,6 @@
 """AWS session management — multi-account, multi-region support."""
 
+from functools import cached_property
 from typing import Any
 
 import boto3
@@ -25,9 +26,14 @@ class AwsSession:
             kwargs["region_name"] = region
         return self.session.client(service, **kwargs)  # type: ignore[call-overload]
 
-    @property
+    @cached_property
     def account_id(self) -> str:
-        """Get the current AWS account ID."""
+        """Get the current AWS account ID.
+
+        Cached (PERF-3): the underlying credentials don't change within a
+        session's lifetime, but 181 check call sites read this property, each
+        of which used to trigger its own STS GetCallerIdentity round-trip.
+        """
         sts = self.session.client("sts")
         return sts.get_caller_identity()["Account"]  # type: ignore[no-any-return]
 

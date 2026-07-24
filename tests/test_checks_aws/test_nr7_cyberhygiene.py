@@ -65,6 +65,23 @@ class TestCheckIamPasswordPolicy:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        iam = session.client("iam")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(iam, "get_account_password_policy", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: iam)
+
+        result = asyncio.run(CheckIamPasswordPolicy().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
+
 
 class TestCheckRootAccessKeys:
     @mock_aws
@@ -76,3 +93,20 @@ class TestCheckRootAccessKeys:
         assert len(compliant) == 1
         assert compliant[0].current_state["root_access_keys_present"] == 0
         assert not _maengel(result)
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        iam = session.client("iam")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(iam, "get_account_summary", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: iam)
+
+        result = asyncio.run(CheckRootAccessKeys().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"

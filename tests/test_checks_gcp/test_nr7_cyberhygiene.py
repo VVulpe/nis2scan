@@ -66,6 +66,17 @@ class TestCheckOrgSecurityPolicies:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session([])
+        service = session.service("orgpolicy", "v2")
+        service.projects.return_value.policies.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckOrgSecurityPolicies().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"
+
 
 class TestCheckEssentialContacts:
     def _session(self, categories: list[str], validation_state: str = "VALID") -> FakeGcpSession:
@@ -102,3 +113,14 @@ class TestCheckEssentialContacts:
 
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
+
+    def test_api_error_produces_check_error_no_finding(self):
+        session = self._session(["SECURITY"])
+        service = session.service("essentialcontacts", "v1")
+        service.projects.return_value.contacts.return_value.list.return_value.execute.side_effect = RuntimeError("boom")
+
+        result = asyncio.run(CheckEssentialContacts().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "RuntimeError"

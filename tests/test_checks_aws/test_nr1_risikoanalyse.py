@@ -78,6 +78,23 @@ class TestCheckCloudTrail:
         assert len(_maengel(result)) == 1
         assert not _compliant(result)
 
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        ct = session.client("cloudtrail")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(ct, "describe_trails", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: ct)
+
+        result = asyncio.run(CheckCloudTrail().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
+
 
 class TestCheckConfigRecorder:
     @mock_aws
@@ -115,6 +132,23 @@ class TestCheckConfigRecorder:
         assert "default" in compliant[0].description
         assert not _maengel(result)
 
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        config = session.client("config")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(config, "describe_configuration_recorders", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: config)
+
+        result = asyncio.run(CheckConfigRecorder().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "AWSClientError"
+
 
 class TestCheckSecurityHub:
     @mock_aws
@@ -128,6 +162,23 @@ class TestCheckSecurityHub:
         compliant = _compliant(result)
         assert len(compliant) == 1
         assert not _maengel(result)
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        sh = session.client("securityhub")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(sh, "describe_hub", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: sh)
+
+        result = asyncio.run(CheckSecurityHub().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "AWSClientError"
 
 
 class TestCheckOrganizationsScp:
@@ -173,6 +224,23 @@ class TestCheckOrganizationsScp:
         assert "gegenstandslos" in maengel[0].description
         assert not _compliant(result)
 
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        org = session.client("organizations")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(org, "describe_organization", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: org)
+
+        result = asyncio.run(CheckOrganizationsScp().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
+
 
 class TestCheckGuardDuty:
     @mock_aws
@@ -195,3 +263,20 @@ class TestCheckGuardDuty:
         assert len(compliant) == 1
         assert compliant[0].current_state["status"] == "ENABLED"
         assert not _maengel(result)
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        gd = session.client("guardduty")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(gd, "list_detectors", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: gd)
+
+        result = asyncio.run(CheckGuardDutyRiskAnalysis().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "AWSClientError"

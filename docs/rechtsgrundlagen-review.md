@@ -345,3 +345,20 @@ Verlaufsabschnitte (Batches Nr. 4–10) und der Kampagnen-Bilanz.
   (durch Orchestrator unabhängig verifiziert).
 - **Gründer-Vermerk: ERTEILT (Chat-Freigabe 24.07.2026 „erteilt, du hast
   mein Go").** Beide ADR-0018-Vermerke liegen vor — Merge frei.
+
+#### Delta-Review GCP-NR4-001 — Evidence-Key-Pseudonymisierung (2026-07-24)
+
+- Gegenstand (Branch `p1/audit-fixes`): Audit-Befund CODE-1 — der
+  current_state-Key "external_members_sample" von GCP-NR4-001
+  (CheckCrossProjectBindings) trug rohe externe IAM-Member-Strings (inkl.
+  Service-Account-E-Mail-Adressen) am ADR-0011-Deny-List-Muster vorbei in
+  den Extern-Export. Fix: Key umbenannt auf "external_member_email"
+  (Deny-List-Suffix greift, Listen-Handling elementweise); bewusst
+  Singular, da die Deny-List das Suffix am Stringende verlangt —
+  Warnkommentar im Code ergänzt (Reviewer-Hinweis).
+- **Zweitprüfung (legal-reviewer): PASS ohne Auflagen.** Textinvarianz
+  aller rechtlich formulierenden Felder wortgleich gegen main verifiziert;
+  neuer Test beweist die elementweise Pseudonymisierung im Extern-Export.
+- **Gründer-Vermerk: ERTEILT (Chat-Vorabfreigabe 24.07.2026 „super, nimm
+  es bitte mit auf", wirksam mit Delta-PASS — Präzedenz msgraph-Ablösung).**
+  Beide ADR-0018-Vermerke liegen vor — Merge frei.

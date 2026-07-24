@@ -8,9 +8,11 @@ from moto import mock_aws
 
 from nis2scan.engine.models.finding import FindingStatus
 from nis2scan.engine.providers.aws.checks.nr10_mfa_kommunikation import (
+    CheckBreakGlassProcedure,
     CheckIamUserMfaEnforcement,
     CheckRootMfa,
     CheckSesSnsTls,
+    CheckVpnAdminAccess,
 )
 from nis2scan.engine.providers.aws.session import AwsSession
 
@@ -193,3 +195,98 @@ class TestCheckSesSnsTls:
 
     def test_required_permissions_do_not_include_ses(self):
         assert "ses:GetAccount" not in CheckSesSnsTls.required_permissions
+
+
+class TestCheckVpnAdminAccess:
+    """Tests for AWS-NR10-003 (VPN/Client VPN for admin access)."""
+
+    @mock_aws
+    def test_active_gateway_produces_positive_evidence(self):
+        session = _make_session()
+        ec2 = session.client("ec2")
+        ec2.create_vpn_gateway(Type="ipsec.1")
+
+        result = asyncio.run(CheckVpnAdminAccess().execute(session))
+
+        compliant = [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
+        assert len(compliant) == 1
+        assert not result.errors
+
+    @mock_aws
+    def test_no_vpn_produces_finding(self, monkeypatch):
+        # moto has no backend for describe_client_vpn_endpoints — stub only that
+        # call (describe_vpn_gateways stays real/moto-backed and returns empty).
+        session = _make_session()
+        ec2 = session.client("ec2")
+        monkeypatch.setattr(ec2, "describe_client_vpn_endpoints", lambda **kwargs: {"ClientVpnEndpoints": []})
+        monkeypatch.setattr(session, "client", lambda service, region=None: ec2)
+
+        result = asyncio.run(CheckVpnAdminAccess().execute(session))
+
+        maengel = [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+        assert len(maengel) == 1
+        assert maengel[0].severity.value == "HIGH"
+        assert not result.errors
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        ec2 = session.client("ec2")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(ec2, "describe_vpn_gateways", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: ec2)
+
+        result = asyncio.run(CheckVpnAdminAccess().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "AWSClientError"
+
+
+class TestCheckBreakGlassProcedure:
+    """Tests for AWS-NR10-005 (break-glass emergency access)."""
+
+    @mock_aws
+    def test_break_glass_named_user_produces_positive_evidence(self):
+        session = _make_session()
+        iam = session.client("iam")
+        iam.create_user(UserName="break-glass-admin")
+
+        result = asyncio.run(CheckBreakGlassProcedure().execute(session))
+
+        compliant = [f for f in result.findings if f.status == FindingStatus.COMPLIANT]
+        assert len(compliant) == 1
+        assert not result.errors
+
+    @mock_aws
+    def test_no_break_glass_user_produces_finding(self):
+        session = _make_session()
+        iam = session.client("iam")
+        iam.create_user(UserName="regular-user")
+
+        result = asyncio.run(CheckBreakGlassProcedure().execute(session))
+
+        maengel = [f for f in result.findings if f.status == FindingStatus.NON_COMPLIANT]
+        assert len(maengel) == 1
+        assert maengel[0].severity.value == "HIGH"
+        assert not result.errors
+
+    @mock_aws
+    def test_api_error_produces_check_error_no_finding(self, monkeypatch):
+        session = _make_session()
+        iam = session.client("iam")
+
+        def _raise(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(iam, "get_paginator", _raise)
+        monkeypatch.setattr(session, "client", lambda service, region=None: iam)
+
+        result = asyncio.run(CheckBreakGlassProcedure().execute(session))
+
+        assert not result.findings
+        assert len(result.errors) == 1
+        assert result.errors[0].error_type == "CheckError"
