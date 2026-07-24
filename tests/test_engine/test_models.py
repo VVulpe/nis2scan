@@ -1,5 +1,7 @@
 """Tests for core Pydantic models."""
 
+from datetime import UTC
+
 import pytest
 
 from nis2scan.engine.models.config import ScanConfig
@@ -72,6 +74,29 @@ class TestFinding:
         data = finding.model_dump()
         assert data["severity"] == "CRITICAL"
         assert data["provider"] == "AWS"
+
+    def test_finding_timestamp_is_timezone_aware(self):
+        """Fail-safe hotfix bonus fix: default_factory used to be datetime.utcnow
+        (naive), the source of 441 DeprecationWarnings across the test suite."""
+        finding = Finding(
+            check_id="AWS-NR8-001",
+            title="Test",
+            description="Test",
+            bsig_30_nr=8,
+            bsig_30_text="§30 Abs. 2 Nr. 8",
+            severity=Severity.LOW,
+            provider=CloudProvider.AWS,
+            region="eu-central-1",
+            resource_id="test",
+            resource_type="test",
+            account_id="123",
+            expected_state="test",
+            remediation="test",
+            remediation_effort="LOW",
+        )
+
+        assert finding.timestamp.tzinfo is not None
+        assert finding.timestamp.tzinfo == UTC
 
 
 class TestScanResult:

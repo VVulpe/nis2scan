@@ -1,6 +1,6 @@
 """Finding model — the core data unit of every scan."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -106,4 +106,4 @@ class Finding(BaseModel):
     )
 
     # Metadata
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
